@@ -10,7 +10,10 @@ import { clamp, dbToLin } from '../lib/db';
 import { MeterHub } from './meters';
 import { devicePick, Generator, Microphone, Player, type DeviceOut } from './devices';
 import { FxRack } from './fx';
-import { anyCue, dcaFor, effectiveFaderDb, governingBusId } from './routing';
+import { anyCue, dcaFor, effectiveFaderDb, governingBusId, muteGroupFor, deviceKind } from './routing';
+import { Dyn1Node, loadDyn1 } from './dyn1';
+import { getFile, putFile } from '../lib/idb';
+import { GEQ_FREQS } from '../model/defaults';
 import { renderDemoStems, DEMO_STEMS, type StemId } from '../audio/demoStems';
 
 interface Link {
@@ -23,6 +26,7 @@ interface Link {
 
 interface PortNodes {
   input: GainNode;
+  pad: GainNode; // device electrical level (mic / line) and +48V requirement
   ha: GainNode;
   out: WaveShaperNode;
 }
@@ -31,6 +35,7 @@ interface Strip {
   eq: BiquadFilterNode[];
   comp: DynamicsCompressorNode;
   makeup: GainNode;
+  delay: DelayNode | null; // lazily created
 }
 
 interface ChNodes extends Strip {
@@ -39,6 +44,7 @@ interface ChNodes extends Strip {
   input: GainNode;
   digital: GainNode;
   hpf: BiquadFilterNode;
+  gate: Dyn1Node | null; // lazily created
   pre: GainNode;
   on: GainNode;
   fader: GainNode;
@@ -67,6 +73,7 @@ interface BusNodes extends Strip {
   pfl: GainNode;
   afl: GainNode;
   mtx: Map<string, SendNodes>;
+  geq: BiquadFilterNode[] | null; // lazily created 31-band GEQ
 }
 
 const curve = (() => {
@@ -101,6 +108,14 @@ export class AudioEngine {
   private listenVol: GainNode;
   private limiter: DynamicsCompressorNode;
   private limMakeup: GainNode;
+  private ceiling: WaveShaperNode;
+  private multi: { merger: ChannelMergerNode; vol: GainNode; ceil: WaveShaperNode; n: number } | null = null;
+  private sinkId = '';
+  readonly osc: Generator;
+  private oscLevel: GainNode;
+  private tbIn: GainNode;
+  private tbLevel: GainNode;
+  workletReady = false;
   private makeupCache = new Map<string, number>();
   private pending = new Set<string>();
   private lastState: ConsoleState | null = null;
@@ -128,10 +143,11 @@ export class AudioEngine {
     // ---- input ports (head amp + A/D converter, which clips at 0 dBFS)
     for (const p of model.inPorts) {
       const input = this.mono();
+      const pad = ctx.createGain();
       const ha = ctx.createGain();
       const out = this.clipper(1);
-      input.connect(ha).connect(out);
-      this.ports.set(p.id, { input, ha, out });
+      input.connect(pad).connect(ha).connect(out);
+      this.ports.set(p.id, { input, pad, ha, out });
       this.meters.addTap(`port.${p.id}`, out, 1);
     }
 
@@ -149,6 +165,16 @@ export class AudioEngine {
 
     // ---- channels
     for (const c of model.channels) this.buildChannel(c);
+
+    // ---- talkback + internal oscillator
+    this.tbIn = this.mono();
+    this.tbLevel = ctx.createGain();
+    this.tbIn.connect(this.tbLevel);
+    this.osc = new Generator(ctx);
+    this.oscLevel = ctx.createGain();
+    this.osc.dev.out.connect(this.oscLevel);
+    this.meters.addTap('osc', this.oscLevel, 1);
+    this.meters.addTap('tb', this.tbLevel, 1);
 
     // ---- monitor / cue
     this.cueGain = ctx.createGain();
@@ -184,7 +210,9 @@ export class AudioEngine {
     this.limiter.release.value = 0.12;
     this.limMakeup = ctx.createGain();
     const ceiling = this.clipper(2, 0.9); // about -0.9 dBFS
-    this.listenVol.connect(this.limiter).connect(this.limMakeup).connect(ceiling).connect(ctx.destination);
+    this.ceiling = ceiling;
+    this.listenVol.connect(this.limiter).connect(this.limMakeup).connect(ceiling);
+    this.wire('dest', [{ key: 'stereo', from: ceiling, to: ctx.destination }]);
     this.meters.addTap('listen', ceiling, 2);
     this.meters.addGr('listen.gr', () => this.limiter.reduction);
     void this.compensate(this.limMakeup, -6, 0, 20, 0);
@@ -263,14 +291,20 @@ export class AudioEngine {
     comp.channelCountMode = 'explicit';
     const makeup = this.ctx.createGain();
     comp.connect(makeup);
-    return { eq, comp, makeup };
+    return { eq, comp, makeup, delay: null };
   }
 
-  /** Links for [start] -> (EQ) -> (COMP) -> end, skipping bypassed stages. */
-  private chainLinks(prefix: string, start: AudioNode, s: Strip, eqOn: boolean, compOn: boolean, end: AudioNode): Link[] {
-    const nodes: [string, AudioNode, AudioNode][] = [];
-    if (eqOn) s.eq.forEach((f, i) => nodes.push([`eq${i}`, f, f]));
-    if (compOn) nodes.push(['comp', s.comp, s.makeup]);
+  private ensureDelay(s: Strip, nch: 1 | 2): DelayNode {
+    if (!s.delay) {
+      s.delay = this.ctx.createDelay(1.0);
+      s.delay.channelCount = nch;
+      s.delay.channelCountMode = 'explicit';
+    }
+    return s.delay;
+  }
+
+  /** Links for start -> each active stage in order -> end (bypassed stages are left out). */
+  private chainLinks(prefix: string, start: AudioNode, nodes: [string, AudioNode, AudioNode][], end: AudioNode): Link[] {
     const links: Link[] = [];
     let prevKey = 'start';
     let prev: AudioNode = start;
@@ -366,12 +400,13 @@ export class AudioEngine {
     pre.connect(pfl).connect(this.cueBus);
     pan.connect(afl).connect(this.cueBus);
     if (c.kind === 'fxreturn') this.fx[c.fxRack! - 1].output.connect(input);
-    const n: ChNodes = { def: c, merger, input, digital, hpf, pre, on, fader, pan, toSt, pfl, afl, sends: new Map(), ...strip };
+    const n: ChNodes = { def: c, merger, input, digital, hpf, gate: null, pre, on, fader, pan, toSt, pfl, afl, sends: new Map(), ...strip };
     this.chans.set(c.id, n);
     this.meters.addTap(`ch.${c.id}.in`, digital, nch);
     this.meters.addTap(`ch.${c.id}.pre`, pre, nch);
     this.meters.addTap(`ch.${c.id}.post`, fader, nch);
     this.meters.addGr(`ch.${c.id}.gr`, () => strip.comp.reduction);
+    this.meters.addGr(`ch.${c.id}.gate`, () => n.gate?.gr ?? 0);
     if (c.kind === 'mono') this.psrc.set(`dir_${c.id}`, [on, 0]);
   }
 
@@ -402,7 +437,7 @@ export class AudioEngine {
     }
     input.connect(pfl).connect(this.cueBus);
     out.connect(afl).connect(this.cueBus);
-    this.buses.set(b.id, { def: b, input, pre, on, fader, out, bal, split, pfl, afl, mtx: new Map(), ...strip });
+    this.buses.set(b.id, { def: b, input, pre, on, fader, out, bal, split, pfl, afl, mtx: new Map(), geq: null, ...strip });
     this.meters.addTap(`bus.${b.id}.in`, input, nch);
     this.meters.addTap(`bus.${b.id}.out`, out, nch);
     this.meters.addGr(`bus.${b.id}.gr`, () => strip.comp.reduction);
@@ -426,6 +461,15 @@ export class AudioEngine {
       const gain = p.hasPreamp ? clamp(state.ports[p.id]?.gain ?? 0, m.haGainRange[0], m.haGainRange[1]) : 0;
       this.set(pn.ha.gain, dbToLin(gain));
       const plug = rig.plugs[p.id];
+      // device electrical behaviour: mic-level sources are ~30 dB below line level,
+      // condenser mics output nothing without +48V phantom power
+      let pad = 0;
+      if (plug && !plug.device.startsWith('loop:')) {
+        const kind = deviceKind(rig, plug.device);
+        const off = plug.device === 'mic' ? 0 : kind === 'dynamic' ? -30 : kind === 'condenser' ? -24 : 0;
+        pad = kind === 'condenser' && !state.ports[p.id]?.phantom ? NEG_INF : off;
+      }
+      this.set(pn.pad.gain, dbToLin(pad));
       const links: Link[] = [];
       if (plug) {
         const loop = /^loop:(.+)$/.exec(plug.device);
@@ -463,6 +507,17 @@ export class AudioEngine {
     // FX
     state.fx.forEach((f, i) => this.fx[i]?.apply(f));
 
+    // talkback + oscillator
+    const tb = state.talkback;
+    const tbPort = tb.source ? this.ports.get(tb.source) : undefined;
+    this.wire('tbsrc', tbPort ? [{ key: tb.source!, from: tbPort.out, to: this.tbIn }] : []);
+    this.set(this.tbLevel.gain, tb.on ? dbToLin(tb.level) : 0);
+    this.wire('tbassign', tb.assign.filter((b) => this.buses.has(b)).map((b) => ({ key: b, from: this.tbLevel, to: this.buses.get(b)!.input })));
+    const osc = state.osc;
+    this.osc.apply({ type: osc.type, freq: osc.freq, level: osc.level, on: osc.on });
+    this.set(this.oscLevel.gain, osc.on ? 1 : 0);
+    this.wire('oscassign', osc.assign.filter((b) => this.buses.has(b)).map((b) => ({ key: b, from: this.oscLevel, to: this.buses.get(b)!.input })));
+
     // monitor + cue
     const cueing = anyCue(state);
     this.set(this.cueGain.gain, cueing ? 1 : 0);
@@ -491,7 +546,58 @@ export class AudioEngine {
     }
     this.wire('listen', links);
     this.set(this.listenVol.gain, dbToLin(Math.min(6, L.volume)));
+    this.syncOutputDevice(rig);
   }
+
+  /** Browser output device + optional multichannel mode (OMNI n -> device output n). */
+  private syncOutputDevice(rig: RigState) {
+    const o = rig.output ?? { sinkId: '', mode: 'stereo' };
+    const ctxSink = this.ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (o.sinkId !== this.sinkId && ctxSink.setSinkId) {
+      this.sinkId = o.sinkId;
+      ctxSink.setSinkId(o.sinkId).catch(() => {
+        this.outputError = 'Could not switch to that audio output device.';
+      });
+    }
+    const max = this.ctx.destination.maxChannelCount;
+    if (o.mode === 'multi' && max > 2) {
+      if (!this.multi || this.multi.n !== max) {
+        const n = Math.min(32, max);
+        this.ctx.destination.channelCount = n;
+        this.ctx.destination.channelCountMode = 'explicit';
+        this.ctx.destination.channelInterpretation = 'discrete';
+        const merger = this.ctx.createChannelMerger(n);
+        const vol = this.ctx.createGain();
+        vol.channelCount = n;
+        vol.channelCountMode = 'explicit';
+        vol.channelInterpretation = 'discrete';
+        const ceil = this.ctx.createWaveShaper();
+        ceil.curve = new Float32Array([-0.9, 0.9]);
+        ceil.channelCount = n;
+        ceil.channelCountMode = 'explicit';
+        ceil.channelInterpretation = 'discrete';
+        merger.connect(vol).connect(ceil);
+        this.multi = { merger, vol, ceil, n };
+      }
+      const m = this.multi;
+      this.set(m.vol.gain, dbToLin(Math.min(6, rig.listen.volume)));
+      const omni = this.model.outPorts.filter((p) => p.group === 'analog').slice(0, m.n);
+      this.wire(
+        'multi',
+        omni.map((p, i) => ({ key: p.id, from: this.outs.get(p.id)!.dac, to: m.merger, in: i })),
+      );
+      this.wire('dest', [{ key: 'multi', from: m.ceil, to: this.ctx.destination }]);
+    } else {
+      if (this.ctx.destination.channelCount !== 2) {
+        this.ctx.destination.channelCount = 2;
+        this.ctx.destination.channelInterpretation = 'speakers';
+      }
+      this.wire('multi', []);
+      this.wire('dest', [{ key: 'stereo', from: this.ceiling, to: this.ctx.destination }]);
+    }
+  }
+
+  outputError = '';
 
   private syncChannel(c: ChannelDef, state: ConsoleState) {
     const n = this.chans.get(c.id)!;
@@ -511,14 +617,34 @@ export class AudioEngine {
     this.set(n.hpf.frequency, clamp(ch.hpfFreq, 20, 600));
     this.applyEq(n, ch.eq);
     this.applyComp(n, ch.comp);
-    const chain: Link[] = [];
-    let start: AudioNode = n.digital;
-    if (ch.hpfOn) {
-      chain.push({ key: 'dig>hpf', from: n.digital, to: n.hpf });
-      start = n.hpf;
+    const nch: 1 | 2 = c.kind === 'mono' ? 1 : 2;
+    const stages: [string, AudioNode, AudioNode][] = [];
+    if (ch.hpfOn) stages.push(['hpf', n.hpf, n.hpf]);
+    if (ch.eqOn) n.eq.forEach((f, i) => stages.push([`eq${i}`, f, f]));
+    if (ch.gate.on && this.workletReady) {
+      if (!n.gate) n.gate = new Dyn1Node(this.ctx, nch);
+      const g = ch.gate;
+      this.set(n.gate.param('threshold'), clamp(g.threshold, -72, 0));
+      this.set(n.gate.param('range'), clamp(g.range, -80, 0));
+      this.set(n.gate.param('attack'), clamp(g.attack, 0, 120));
+      this.set(n.gate.param('hold'), clamp(g.hold, 0, 2000));
+      this.set(n.gate.param('decay'), clamp(g.decay, 5, 4000));
+      this.set(n.gate.param('mode'), g.mode === 'ducker' ? 1 : 0);
+      const keyCh = g.key !== 'self' && g.key !== c.id ? this.chans.get(g.key) : undefined;
+      this.set(n.gate.param('ext'), keyCh ? 1 : 0);
+      this.wire(`key:${c.id}`, keyCh ? [{ key: g.key, from: keyCh.digital, to: n.gate.node, in: 1 }] : []);
+      stages.push(['gate', n.gate.node, n.gate.node]);
+    } else if (n.gate) {
+      this.wire(`key:${c.id}`, []);
+      n.gate.gr = 0;
     }
-    chain.push(...this.chainLinks(ch.hpfOn ? 'h' : 'd', start, n, ch.eqOn, ch.comp.on, n.pre));
-    this.wire(`chain:${c.id}`, chain);
+    if (ch.comp.on) stages.push(['comp', n.comp, n.makeup]);
+    if (ch.delayOn) {
+      const d = this.ensureDelay(n, nch);
+      this.set(d.delayTime, clamp(ch.delayMs, 0, 1000) / 1000, 0.03);
+      stages.push(['dly', d, d]);
+    }
+    this.wire(`chain:${c.id}`, this.chainLinks('c', n.digital, stages, n.pre));
 
     // ON, fader (incl. DCA), pan, ST assign, cue
     const dca = dcaFor(state, c.id);
@@ -544,6 +670,15 @@ export class AudioEngine {
       } else {
         this.syncSend(n, ch.sends[b.id], `${c.id}:${b.id}`, b.id, [b.id]);
       }
+    }
+    // input channel -> matrix sends
+    for (const b of this.model.buses) {
+      if (b.kind !== 'matrix') continue;
+      const pp = pairPartner(b.id)!;
+      if (state.pairLinked[pairKeyOf(b.id)!]) {
+        if (b.id === pp.left) this.syncSend(n, ch.sends[pp.left], `${c.id}:${b.id}`, b.id, [pp.left, pp.right]);
+        else this.syncSend(n, undefined, `${c.id}:${b.id}`, b.id, []);
+      } else this.syncSend(n, ch.sends[b.id], `${c.id}:${b.id}`, b.id, [b.id]);
     }
   }
 
@@ -594,9 +729,35 @@ export class AudioEngine {
     } else {
       this.applyEq(n, bs.eq);
       this.applyComp(n, bs.comp);
-      this.wire(`chain:${b.id}`, this.chainLinks('b', n.input, n, bs.eqOn, bs.comp.on, n.pre));
+      const nch: 1 | 2 = b.kind === 'stereo' ? 2 : 1;
+      const stages: [string, AudioNode, AudioNode][] = [];
+      if (bs.eqOn) n.eq.forEach((f, i) => stages.push([`eq${i}`, f, f]));
+      if (bs.comp.on) stages.push(['comp', n.comp, n.makeup]);
+      if (bs.geqOn && this.model.geqBuses.includes(gov)) {
+        if (!n.geq) {
+          n.geq = GEQ_FREQS.map((f) => {
+            const q = this.ctx.createBiquadFilter();
+            q.type = 'peaking';
+            q.frequency.value = f;
+            q.Q.value = 4.32; // 1/3 octave
+            q.channelCount = nch;
+            q.channelCountMode = 'explicit';
+            return q;
+          });
+        }
+        n.geq.forEach((q, i) => {
+          this.set(q.gain, clamp(bs.geq[i] ?? 0, -15, 15));
+          stages.push([`geq${i}`, q, q]);
+        });
+      }
+      if (bs.delayOn) {
+        const d = this.ensureDelay(n, nch);
+        this.set(d.delayTime, clamp(bs.delayMs, 0, 1000) / 1000, 0.03);
+        stages.push(['dly', d, d]);
+      }
+      this.wire(`chain:${b.id}`, this.chainLinks('b', n.input, stages, n.pre));
     }
-    this.set(n.on.gain, bs.on ? 1 : 0);
+    this.set(n.on.gain, bs.on && !muteGroupFor(state, bs.muteGroups) ? 1 : 0);
     this.set(n.fader.gain, dbToLin(bs.fader));
     if (n.bal) this.set(n.bal.pan, clamp(bs.balance / 63, -1, 1));
     const own = state.buses[b.id];
@@ -653,6 +814,17 @@ export class AudioEngine {
     if (this.ctx.state !== 'running') await this.ctx.resume();
   }
 
+  /** Load the gate/ducker worklet; until then Dynamics 1 is treated as bypassed. */
+  async loadWorklets(): Promise<void> {
+    try {
+      await loadDyn1(this.ctx);
+      this.workletReady = true;
+      if (this.lastState && this.lastRig) this.sync(this.lastState, this.lastRig);
+    } catch {
+      this.workletReady = false;
+    }
+  }
+
   async loadStems(): Promise<void> {
     if (Object.keys(this.stems).length) return;
     this.stems = await renderDemoStems(this.ctx.sampleRate);
@@ -671,15 +843,37 @@ export class AudioEngine {
 
   async loadFile(index: number, file: File): Promise<void> {
     const data = await file.arrayBuffer();
+    await this.loadData(index, file.name, data.slice(0));
+    void putFile(`player${index}`, { name: file.name, data });
+  }
+
+  async loadData(index: number, name: string, data: ArrayBuffer): Promise<void> {
     let buf: AudioBuffer;
     try {
       buf = await this.ctx.decodeAudioData(data);
     } catch {
       throw new Error(
-        `"${file.name}" could not be decoded. This browser supports WAV, MP3, OGG/Opus, AAC/M4A or FLAC depending on platform; try converting the file to WAV or MP3.`,
+        `"${name}" could not be decoded. This browser supports WAV, MP3, OGG/Opus, AAC/M4A or FLAC depending on platform; try converting the file to WAV or MP3.`,
       );
     }
-    this.players[index].setBuffer(buf, file.name);
+    this.players[index].setBuffer(buf, name);
+  }
+
+  /** Reload user files saved in IndexedDB for players set to 'file'. */
+  async restoreFiles(rig: RigState): Promise<string[]> {
+    const restored: string[] = [];
+    for (let i = 0; i < rig.players.length; i++) {
+      if (rig.players[i].source !== 'file' || this.players[i].buffer) continue;
+      const f = await getFile(`player${i}`);
+      if (!f) continue;
+      try {
+        await this.loadData(i, f.name, f.data);
+        restored.push(f.name);
+      } catch {
+        /* undecodable: leave empty */
+      }
+    }
+    return restored;
   }
 
   /** Start every loaded player in sample-accurate sync (demo multitrack). */

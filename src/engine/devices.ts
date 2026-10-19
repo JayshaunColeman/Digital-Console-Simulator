@@ -45,10 +45,20 @@ export class Generator {
     this.level.connect(this.dev.out);
   }
 
-  private buffer(type: 'white' | 'pink' | 'impulse' | 'sweep'): AudioBuffer {
+  private buffer(type: 'white' | 'pink' | 'impulse' | 'sweep' | 'burst'): AudioBuffer {
     const hit = this.buffers.get(type);
     if (hit) return hit;
     const sr = this.ctx.sampleRate;
+    if (type === 'burst') {
+      // burst noise: 250 ms of pink noise, 750 ms of silence
+      const pink = this.buffer('pink').getChannelData(0);
+      const b = this.ctx.createBuffer(1, sr, sr);
+      const d = b.getChannelData(0);
+      const on = Math.floor(sr * 0.25);
+      for (let i = 0; i < on; i++) d[i] = pink[i] * Math.min(1, i / 64, (on - i) / 64);
+      this.buffers.set(type, b);
+      return b;
+    }
     const len = type === 'sweep' ? sr * 6 : type === 'impulse' ? sr : sr * 4;
     const b = this.ctx.createBuffer(1, len, sr);
     const d = b.getChannelData(0);
@@ -245,9 +255,9 @@ export class Microphone {
 
   constructor(private ctx: AudioContext) {
     this.dev = makeDeviceOut(ctx);
+    // keeps the stream's channel layout: on a stereo / multichannel interface the
+    // plug's L / R choice picks interface input 1 / 2, SUM mixes them
     this.level = ctx.createGain();
-    this.level.channelCount = 1;
-    this.level.channelCountMode = 'explicit';
     this.level.connect(this.dev.out);
   }
 
@@ -268,6 +278,7 @@ export class Microphone {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: deviceId ? { exact: deviceId } : undefined,
+          channelCount: { ideal: 2 },
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,

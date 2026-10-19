@@ -1,6 +1,6 @@
 import { useStore } from '../state/store';
 import { Fader, Key, Meter, MeterScale, GrMeter, Knob, Select } from './controls';
-import { fmtDb } from '../lib/db';
+import { fmtDb, fmtHz } from '../lib/db';
 import { anyCue, governingBusId, isLinked } from '../engine/routing';
 
 const SOF_BUSES = ['mix1', 'mix2', 'mix3', 'mix4', 'mix5', 'mix6', 'fx1', 'fx2'];
@@ -116,6 +116,35 @@ export function MasterSection() {
       </div>
 
       <div className="master-block">
+        <div className="block-title">MUTE GROUPS</div>
+        <div className="sof-buses" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          {consoleState.muteGroups.map((g, i) => {
+            const members = [
+              ...Object.values(consoleState.channels).filter((c) => c.muteGroups.includes(i + 1)).map((c) => c.name),
+              ...Object.values(consoleState.buses).filter((b) => b.muteGroups.includes(i + 1)).map((b) => b.name),
+            ];
+            return (
+              <Key
+                key={i}
+                small
+                kind="warn"
+                on={g.on}
+                topic="mute-group"
+                testid={`mg-${i + 1}`}
+                title={members.length ? `Members: ${members.join(', ')}` : 'No members assigned'}
+                onClick={() => set((c) => void (c.muteGroups[i].on = !g.on))}
+              >
+                MUTE {i + 1}
+                {members.length ? '' : ' ·'}
+              </Key>
+            );
+          })}
+        </div>
+      </div>
+
+      <TalkbackOsc />
+
+      <div className="master-block">
         <div className="block-title">MONITOR / LISTEN</div>
         <label className="field">
           <span>Browser hears</span>
@@ -187,5 +216,75 @@ export function MasterSection() {
         <Knob label="MON/PHONES" value={monitor.level} min={-60} max={10} step={0.5} reset={-10} fmt={(v) => fmtDb(v)} topic="monitor" onChange={(v) => set((c) => void (c.monitor.level = v))} />
       </div>
     </aside>
+  );
+}
+
+const ASSIGNABLE = ['mix1', 'mix2', 'mix3', 'mix4', 'mix5', 'mix6', 'st', 'mtx1', 'mtx2'];
+
+function TalkbackOsc() {
+  const tb = useStore((s) => s.console.talkback);
+  const osc = useStore((s) => s.console.osc);
+  const model = useStore((s) => s.model);
+  const set = useStore((s) => s.set);
+  const toggle = (arr: string[], b: string) => (arr.includes(b) ? arr.filter((x) => x !== b) : [...arr, b]);
+  return (
+    <div className="master-block">
+      <div className="block-title">TALKBACK</div>
+      <div className="strip-row wrap">
+        <Key kind="cue" on={tb.on} topic="talkback" testid="tb-on" onClick={() => set((c) => void (c.talkback.on = !tb.on))}>
+          TALKBACK
+        </Key>
+        <Meter tap="tb" height={12} width={70} label="Talkback level" />
+      </div>
+      <label className="field">
+        <span>Source</span>
+        <Select
+          label="Talkback source"
+          topic="talkback"
+          value={tb.source ?? ''}
+          onChange={(v) => set((c) => void (c.talkback.source = v || null))}
+          options={[{ value: '', label: '— none —' }, ...model.inPorts.map((p) => ({ value: p.id, label: p.label }))]}
+        />
+      </label>
+      <Knob label="TB LEVEL" value={tb.level} min={-40} max={10} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="talkback" onChange={(v) => set((c) => void (c.talkback.level = v))} />
+      <div className="sof-buses">
+        {ASSIGNABLE.map((b) => (
+          <Key key={b} small on={tb.assign.includes(b)} topic="talkback" testid={`tb-assign-${b}`} onClick={() => set((c) => void (c.talkback.assign = toggle(c.talkback.assign, b)))}>
+            {b.toUpperCase()}
+          </Key>
+        ))}
+      </div>
+
+      <div className="block-title">OSCILLATOR</div>
+      <div className="strip-row wrap">
+        <Key kind="warn" on={osc.on} topic="osc" testid="osc-on" onClick={() => set((c) => void (c.osc.on = !osc.on))}>
+          OSC {osc.on ? 'ON' : 'OFF'}
+        </Key>
+        <Select
+          label="Oscillator type"
+          topic="osc"
+          testid="osc-type"
+          value={osc.type}
+          onChange={(v) => set((c) => void (c.osc.type = v as 'sine' | 'pink' | 'burst'))}
+          options={[
+            { value: 'sine', label: 'Sine' },
+            { value: 'pink', label: 'Pink noise' },
+            { value: 'burst', label: 'Burst noise' },
+          ]}
+        />
+      </div>
+      <div className="strip-row">
+        <Knob label="FREQ" value={osc.freq} min={20} max={20000} log reset={1000} fmt={fmtHz} disabled={osc.type !== 'sine'} topic="osc" onChange={(v) => set((c) => void (c.osc.freq = Math.round(v)))} />
+        <Knob label="LEVEL" value={osc.level} min={-96} max={0} step={1} reset={-20} fmt={(v) => `${v}`} topic="osc" testid="osc-level" onChange={(v) => set((c) => void (c.osc.level = v))} />
+        <Meter tap="osc" height={12} width={60} label="Oscillator level" />
+      </div>
+      <div className="sof-buses">
+        {ASSIGNABLE.map((b) => (
+          <Key key={b} small kind="warn" on={osc.assign.includes(b)} topic="osc" testid={`osc-assign-${b}`} onClick={() => set((c) => void (c.osc.assign = toggle(c.osc.assign, b)))}>
+            {b.toUpperCase()}
+          </Key>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -12,7 +12,7 @@ export function RoutingScreen() {
   const set = useStore((s) => s.set);
   const setUi = useStore((s) => s.setUi);
   const setTopic = useTopic();
-  const cols = model.buses.filter((b) => b.kind === 'stereo' || ((b.kind === 'mix' || b.kind === 'fx') && governingBusId(c, b.id) === b.id));
+  const cols = model.buses.filter((b) => b.kind === 'stereo' || ((b.kind === 'mix' || b.kind === 'fx' || b.kind === 'matrix') && governingBusId(c, b.id) === b.id));
 
   const clickCell = (ch: string, bus: string, e: React.MouseEvent) => {
     if (bus === 'st') {

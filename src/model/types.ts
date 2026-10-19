@@ -53,6 +53,9 @@ export interface ConsoleModel {
   outPorts: OutPortDef[];
   patchSources: PatchSourceDef[];
   dcaCount: number;
+  muteGroupCount: number;
+  geqBuses: string[]; // buses that can take the 31-band GEQ
+  maxDelayMs: number;
   fxRackCount: number;
   haGainRange: [number, number];
   digitalGainRange: [number, number];
@@ -78,6 +81,17 @@ export interface CompState {
   makeup: number; // dB
 }
 
+export interface GateState {
+  on: boolean;
+  mode: 'gate' | 'ducker';
+  threshold: number; // dBFS
+  range: number; // dB of attenuation when closed (gate) / ducked (ducker), negative
+  attack: number; // ms
+  hold: number; // ms
+  decay: number; // ms
+  key: string; // 'self' or a channel id used as key-in (post digital gain)
+}
+
 export interface SendState {
   on: boolean;
   level: number; // dB
@@ -96,14 +110,18 @@ export interface ChannelState {
   hpfFreq: number;
   eqOn: boolean;
   eq: EqBand[];
-  comp: CompState;
+  gate: GateState; // Dynamics 1
+  comp: CompState; // Dynamics 2
+  delayOn: boolean;
+  delayMs: number; // input delay 0..1000 ms
+  muteGroups: number[]; // 1-based
   on: boolean; // Yamaha "ON" key: true = channel live, false = muted
   fader: number; // dB
   pan: number; // -63..63
   toSt: boolean;
   cue: boolean;
   dca: number[]; // DCA group membership (1-based)
-  sends: Record<string, SendState>; // keyed by mix/fx bus id
+  sends: Record<string, SendState>; // keyed by mix / fx / matrix bus id
 }
 
 export interface BusState {
@@ -114,6 +132,11 @@ export interface BusState {
   eqOn: boolean;
   eq: EqBand[];
   comp: CompState;
+  geqOn: boolean;
+  geq: number[]; // 31-band graphic EQ gains (dB), STEREO + MIX buses only
+  delayOn: boolean;
+  delayMs: number; // output delay 0..1000 ms
+  muteGroups: number[];
   cue: boolean;
   // matrix sends from this bus (stereo + mix buses only)
   mtxSends: Record<string, { on: boolean; level: number }>;
@@ -122,6 +145,7 @@ export interface BusState {
 
 export interface PortState {
   gain: number; // analog head-amp gain (dB) - only for ports with preamps
+  phantom: boolean; // +48V
 }
 
 export interface OutPortState {
@@ -135,7 +159,17 @@ export interface DcaState {
   on: boolean;
 }
 
-export type FxType = 'reverb-hall' | 'reverb-plate' | 'delay-stereo' | 'delay-mono';
+export type FxType =
+  | 'reverb-hall'
+  | 'reverb-room'
+  | 'reverb-plate'
+  | 'early-ref'
+  | 'delay-stereo'
+  | 'delay-mono'
+  | 'chorus'
+  | 'flanger'
+  | 'phaser'
+  | 'tremolo';
 
 export interface FxState {
   type: FxType;
@@ -144,6 +178,28 @@ export interface FxState {
   feedback: number; // 0..0.95 (delay)
   hiCut: number; // Hz damping
   loCut: number; // Hz
+  rate: number; // Hz (modulation effects)
+  depth: number; // 0..1 (modulation effects)
+}
+
+export interface MuteGroupState {
+  name: string;
+  on: boolean; // engaged = members muted
+}
+
+export interface TalkbackState {
+  on: boolean;
+  source: string | null; // input port id used as talkback mic
+  level: number; // dB
+  assign: string[]; // bus ids
+}
+
+export interface OscState {
+  on: boolean;
+  type: 'sine' | 'pink' | 'burst';
+  freq: number;
+  level: number; // dBFS
+  assign: string[]; // bus ids
 }
 
 export interface ConsoleState {
@@ -154,6 +210,9 @@ export interface ConsoleState {
   ports: Record<string, PortState>;
   outPorts: Record<string, OutPortState>;
   dcas: DcaState[];
+  muteGroups: MuteGroupState[];
+  talkback: TalkbackState;
+  osc: OscState;
   fx: FxState[];
   monitor: {
     source: string; // 'st' | mix bus id
@@ -173,7 +232,7 @@ export interface Plug {
 }
 
 export interface GeneratorState {
-  type: 'sine' | 'pink' | 'white' | 'impulse' | 'sweep';
+  type: 'sine' | 'pink' | 'white' | 'impulse' | 'sweep' | 'burst';
   freq: number;
   level: number; // dBFS
   on: boolean;
@@ -187,8 +246,11 @@ export interface PlayerState {
   level: number; // dB trim of the playback device itself
 }
 
+export type DeviceKind = 'line' | 'dynamic' | 'condenser';
+
 export interface RigState {
   plugs: Record<string, Plug | null>; // keyed by input port id
+  kinds: Record<string, DeviceKind>; // what each device behaves like electrically
   generator: GeneratorState;
   players: PlayerState[];
   micLevel: number; // dB offset applied to the browser microphone ("mic level")
@@ -197,6 +259,10 @@ export interface RigState {
     l: string | null; // output port id
     r: string | null;
     volume: number; // browser output volume dB
+  };
+  output: {
+    sinkId: string; // '' = system default audio device
+    mode: 'stereo' | 'multi'; // multi: OMNI OUT n -> interface output n
   };
   outNames: Record<string, string>; // what is connected to each output ("Wedge 1")
 }

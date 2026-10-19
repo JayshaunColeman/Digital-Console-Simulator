@@ -455,4 +455,267 @@ export const SCENARIOS: Scenario[] = [
         ...live(ctx, 'Live signal at OMNI OUT 2', (c) => c.peak('out.omni2') > -60),
       ]),
   },
+
+  // m --------------------------------------------------------------------------
+  {
+    id: 'phantom-off-condenser',
+    title: 'Vocal mic is dead everywhere',
+    difficulty: 2,
+    brief:
+      'The singer swapped to her new studio-style vocal mic for tonight. The cable is plugged in, the channel is up, the gain is up, and she is singing her heart out - but there is absolutely nothing from her, in the PA or in any wedge. The old dynamic mic worked fine on the same channel.',
+    setup: (s: ConsoleState, r: RigState) => {
+      intendedShow(s);
+      r.kinds.p1 = 'condenser';
+      s.ports.in1.gain = 24;
+      s.ports.in1.phantom = false;
+    },
+    hints: [
+      'The channel strip, the fader, the sends and the patch all look normal - the console just never receives any signal from this mic.',
+      'Use SIGNAL FLOW and trace from the vocal source to channel 1: the cable into INPUT 1 is the connection shown as broken. Think about what this type of microphone needs from the console to work at all.',
+      'A condenser microphone has active electronics that need +48V phantom power from the preamp. Switch +48V on for INPUT 1 (SELECTED CH > INPUT, next to HA GAIN, or the +48V column on I/O PATCH > INPUT SOCKETS).',
+    ],
+    solution:
+      'The vocal mic is a condenser, and +48V phantom power was off on INPUT 1, so the microphone produced no signal at all (the gain was fine, there was simply nothing to amplify). Switch +48V on for INPUT 1 and keep the head-amp gain sensible. Concept: condenser microphones need phantom power, dynamic microphones do not - and never "fix" it by swapping the mic type in the rig or plugging something else in; the microphone is the right one. (Good habit: lower the gain before switching +48V on or off, to avoid a loud thump.)',
+    trace: { from: 'dev:p1', to: 'ch:ch1' },
+    check: (ctx) => {
+      const ha = ctx.state.ports.in1.gain;
+      const items: Item[] = [
+        ['Vocal signal arriving at channel 1', ctx.gain('dev:p1', 'ch:ch1') > -10],
+        ['Vocal reaching the PA (OMNI OUT 7)', reaches(ctx.gain('dev:p1', 'out:omni7'))],
+        ['Vocal reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('dev:p1', 'out:omni1'))],
+        ['The singer\'s own condenser mic is still the source', ctx.rig.kinds.p1 === 'condenser' && ctx.rig.plugs.in1?.device === 'p1'],
+        ['Head-amp gain at a sane level', ha <= 40],
+      ];
+      if (ctx.audio) {
+        const p = ctx.peak('port.in1');
+        items.push(['Input 1 clean with headroom (play the vocal)', p > -60 && p < -3]);
+      }
+      return result(items);
+    },
+  },
+
+  // n --------------------------------------------------------------------------
+  {
+    id: 'mute-group-engaged',
+    title: 'Vocal and keys gone after the break',
+    difficulty: 2,
+    brief:
+      'After the speeches between songs the singer and the keys player started again, but neither of them can be heard - not out front and not in their wedges. The drums and the bass are playing along as normal. Every fader and ON key on those two channels looks fine.',
+    setup: (s: ConsoleState) => {
+      intendedShow(s);
+      s.muteGroups[0] = { name: 'SPEECH', on: true };
+      s.channels.ch1.muteGroups = [1];
+      s.channels.ch6.muteGroups = [1];
+    },
+    hints: [
+      'Two unrelated channels went quiet at the same moment, while the rest of the band is fine. Something groups those two together.',
+      'Look at the SIGNAL FLOW trace for the vocal: the reason shown for the broken connection is not the channel\'s own ON key. Check the MASTER section for things that mute many channels at once.',
+      'Mute group 1 is engaged and both the vocal and the keys are assigned to it (SELECTED CH > MUTE GROUP). Disengage MUTE GROUP 1 in the MASTER section, or take the two channels out of the group.',
+    ],
+    solution:
+      'Mute group 1 had been used to mute the vocal and the keys during the speeches, and it was left engaged afterwards. A mute group silences all of its member channels (including their sends) while it is on, regardless of each channel\'s own ON key. Switch MUTE GROUP 1 off in the MASTER section (or remove the channels from the group). Concept: mute groups are like DCA mutes - they hide in the MASTER section, so check them whenever several unrelated channels are silent together. Do not fix it by muting something else.',
+    trace: { from: 'ch:ch1', to: 'out:omni7' },
+    check: (ctx) =>
+      result([
+        ['Vocal reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch1', 'out:omni7'))],
+        ['Vocal reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('ch:ch1', 'out:omni1'))],
+        ['Keys reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch6', 'out:omni7'))],
+        ['Keys reaching Wedge 2 (OMNI OUT 2)', reaches(ctx.gain('ch:ch6', 'out:omni2'))],
+        [
+          'Drums and bass still playing in the PA and their wedges',
+          ['ch2', 'ch3', 'ch5'].every((id) => reaches(ctx.gain(`ch:${id}`, 'out:omni7'))) &&
+            reaches(ctx.gain('ch:ch2', 'out:omni3')) &&
+            reaches(ctx.gain('ch:ch5', 'out:omni4')),
+        ],
+        ...live(ctx, 'Live signal at the PA (OMNI OUT 7)', (c) => c.peak('out.omni7') > -60),
+      ]),
+  },
+
+  // o --------------------------------------------------------------------------
+  {
+    id: 'gate-chopping-vocal',
+    title: 'Vocal keeps cutting out',
+    difficulty: 2,
+    brief:
+      'The singer sounds like she is being chopped up: words start late, the ends of phrases vanish, and between lines the vocal drops away completely. She is singing at a perfectly normal level and the input meter looks healthy.',
+    setup: (s: ConsoleState) => {
+      intendedShow(s);
+      s.channels.ch1.gate = {
+        on: true,
+        mode: 'gate',
+        threshold: -12,
+        range: -80,
+        attack: 1,
+        hold: 50,
+        decay: 150,
+        key: 'self',
+      };
+    },
+    hints: [
+      'The signal arrives healthy and the routing is fine, so something on the channel is opening and closing on the signal itself.',
+      'Look in SELECTED CH at DYNAMICS 1 and watch its gain-reduction meter while the vocal plays.',
+      'The gate in DYNAMICS 1 has its threshold very high (-12 dBFS) and a very deep range, so everything quieter than the loud peaks is cut. Switch the gate off, or lower the threshold well below the quiet parts of the vocal (for example -45 dBFS).',
+    ],
+    solution:
+      'The vocal channel had its gate (Dynamics 1) switched on with the threshold at -12 dBFS and the range at -80 dB. Any part of the vocal quieter than -12 dBFS was cut by 80 dB, so only the loudest syllables got through. A gate should sit just above the noise floor and below the quietest wanted signal - switch it off for a vocal, or set the threshold to around -45 dBFS or lower. Concept: a gate threshold set too high behaves like a fader slamming shut on the wanted signal.',
+    trace: { from: 'ch:ch1', to: 'out:omni7' },
+    check: (ctx) => {
+      const g = ctx.state.channels.ch1.gate;
+      const sane = !g.on || (g.mode === 'gate' && g.threshold <= -35);
+      const items: Item[] = [
+        ['Vocal passes through uncut', sane],
+        ['Vocal reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch1', 'out:omni7'))],
+        ['Vocal reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('ch:ch1', 'out:omni1'))],
+      ];
+      if (ctx.audio) items.push(['Vocal not being clamped down (play the vocal)', ctx.gr('ch.ch1.gate') > -20]);
+      return result(items);
+    },
+  },
+
+  // p --------------------------------------------------------------------------
+  {
+    id: 'oscillator-left-on',
+    title: 'Hiss in every wedge',
+    difficulty: 2,
+    brief:
+      'All four wedges have a constant "shhhhh" noise in them, even between songs and with every mic muted. The singer says it is like standing next to a waterfall. The in-ear mixes and the PA out front are clean.',
+    setup: (s: ConsoleState) => {
+      intendedShow(s);
+      s.osc = { on: true, type: 'pink', freq: 1000, level: -20, assign: ['mix1', 'mix2', 'mix3', 'mix4'] };
+    },
+    hints: [
+      'The noise is the same in all four wedges and does not depend on any channel - it is not coming from a microphone.',
+      'What can put a signal straight into a bus without going through a channel? Look in the MASTER section.',
+      'The OSCILLATOR is on, set to pink noise, and assigned to MIX 1-4 (the wedge buses). Switch it off, or take the wedge buses out of its assignment.',
+    ],
+    solution:
+      'The console oscillator (pink noise at -20 dBFS) had been left on after ringing out the wedges and was still assigned to MIX 1-4. The oscillator injects its signal directly into the assigned buses, bypassing every channel, so muting channels does nothing. Switch the oscillator off (or unassign the buses). Do not mute the wedge buses - the mixes still need to carry the band. Concept: test signals (oscillator, generator) and talkback live outside the channel strips; check them whenever noise appears in a bus with all channels quiet.',
+    trace: { from: 'osc', to: 'out:omni1' },
+    check: (ctx) => {
+      const o = ctx.state.osc;
+      const wedges = ['mix1', 'mix2', 'mix3', 'mix4'];
+      const notWedge = !o.on || wedges.every((b) => !o.assign.includes(b));
+      const quiet = [1, 2, 3, 4].every((n) => ctx.gain('osc', `out:omni${n}`) < -40) && ctx.gain('osc', 'out:omni7') < -40;
+      const mixes =
+        reaches(ctx.gain('ch:ch1', 'out:omni1')) &&
+        reaches(ctx.gain('ch:ch6', 'out:omni2')) &&
+        reaches(ctx.gain('ch:ch2', 'out:omni3')) &&
+        reaches(ctx.gain('ch:ch5', 'out:omni4'));
+      return result([
+        ['Wedges free of test noise', notWedge && quiet],
+        ['Vocal still reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('ch:ch1', 'out:omni1'))],
+        ['All four wedge mixes still carrying the band', mixes],
+        ...live(ctx, 'Live signal at OMNI OUT 1', (c) => c.peak('out.omni1') > -60),
+      ]);
+    },
+  },
+
+  // q --------------------------------------------------------------------------
+  {
+    id: 'talkback-latched',
+    title: 'Engineer chatter in the wedges',
+    difficulty: 1,
+    brief:
+      'The band can hear the sound engineer talking and clearing his throat in all four wedges, and he swears he is not pressing anything. It carries on during the songs.',
+    setup: (s: ConsoleState) => {
+      intendedShow(s);
+      s.talkback = { on: true, source: 'in8', level: 0, assign: ['mix1', 'mix2', 'mix3', 'mix4'] };
+    },
+    hints: [
+      'The voice is coming from the engineer\'s own microphone, which is not a normal input channel in any mix.',
+      'The console has a dedicated way to speak into monitor mixes. Look in the MASTER section.',
+      'TALKBACK is switched on (latched) and assigned to MIX 1-4. Switch the TB key off, or clear the mix assignments.',
+    ],
+    solution:
+      'Talkback was latched on, with the engineer\'s mic on INPUT 8 assigned to MIX 1-4, so everything he said went into every wedge. Switch the TB key off (it should be momentary or used only when talking), or clear the MIX 1-4 assignments if talkback is not wanted there. Concept: talkback is a direct injection into the assigned buses, independent of channels, faders and sends.',
+    trace: { from: 'tb', to: 'out:omni1' },
+    check: (ctx) => {
+      const t = ctx.state.talkback;
+      const wedges = ['mix1', 'mix2', 'mix3', 'mix4'];
+      const clear = !t.on || wedges.every((b) => !t.assign.includes(b));
+      const quiet = [1, 2, 3, 4].every((n) => ctx.gain('tb', `out:omni${n}`) < -40);
+      return result([
+        ['Wedges free of the engineer\'s voice', clear && quiet],
+        ['Vocal still reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('ch:ch1', 'out:omni1'))],
+        ['Keys still reaching Wedge 2 (OMNI OUT 2)', reaches(ctx.gain('ch:ch6', 'out:omni2'))],
+        ...live(ctx, 'Live signal at OMNI OUT 1', (c) => c.peak('out.omni1') > -60),
+      ]);
+    },
+  },
+
+  // r --------------------------------------------------------------------------
+  {
+    id: 'ducker-wrong-key',
+    title: 'Backing track pumps with the kick',
+    difficulty: 3,
+    brief:
+      'The band wants the backing track to tuck down a little under the singer. Instead it dips in time with the kick drum, every beat, and hardly moves at all when she sings.',
+    setup: (s: ConsoleState) => {
+      intendedShow(s);
+      s.channels.stin.gate = {
+        on: true,
+        mode: 'ducker',
+        threshold: -30,
+        range: -12,
+        attack: 10,
+        hold: 100,
+        decay: 400,
+        key: 'ch2',
+      };
+    },
+    hints: [
+      'The backing track is being turned down automatically by something - but by the wrong thing.',
+      'Open SELECTED CH for the backing track (ST IN) and look at DYNAMICS 1. Every ducker listens to a signal called the key.',
+      'The ducker on ST IN has its KEY set to channel 2 (the kick). Set the key source to channel 1 (the vocal), or switch the ducker off.',
+    ],
+    solution:
+      'The backing track had a ducker in Dynamics 1, but its key input was channel 2 (Kick) instead of channel 1 (Vocal). A ducker lowers its own channel whenever the key signal exceeds the threshold, so the backing dipped on every kick. Set the key to channel 1 so the backing only tucks under the singer (or switch the ducker off). Keep the mode as DUCKER with a moderate range (around -6 to -15 dB) - a gate here would do the opposite. Concept: side-chain dynamics are controlled by the key, not by the channel\'s own signal.',
+    trace: { from: 'ch:ch2', to: 'ch:stin' },
+    check: (ctx) => {
+      const g = ctx.state.channels.stin.gate;
+      const ok = !g.on || (g.mode === 'ducker' && g.key === 'ch1' && g.range >= -30 && g.range <= -3);
+      return result([
+        ['Backing track follows the singer, not the drums', ok],
+        ['Backing track still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:stin', 'out:omni7'))],
+        ['Vocal still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch1', 'out:omni7'))],
+        ['Kick still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch2', 'out:omni7'))],
+        ...live(ctx, 'Live backing signal in the PA', (c) => c.peak('ch.stin.in') > -60),
+      ]);
+    },
+  },
+
+  // s --------------------------------------------------------------------------
+  {
+    id: 'delay-misaligned',
+    title: 'Rear speakers sound like an echo',
+    difficulty: 3,
+    brief:
+      'Out front the PA sounds great, but the people standing near the back, under the extra speakers, hear everything twice - a clear echo, as if the band were repeating itself almost a second later.',
+    setup: (s: ConsoleState, r: RigState) => {
+      intendedShow(s);
+      // delay speakers: STEREO -> MATRIX 1 -> OMNI OUT 5
+      s.buses.st.mtxSends.mtx1 = { on: true, level: 0 };
+      s.outPorts.omni5.source = 'mtx1';
+      r.outNames.omni5 = 'Delay speakers (rear)';
+      s.buses.mtx1.delayOn = true;
+      s.buses.mtx1.delayMs = 900;
+    },
+    hints: [
+      'The content of the rear speakers is right - it is the timing that is wrong.',
+      'Find the bus that feeds OMNI OUT 5 (I/O PATCH) and look at its output processing.',
+      'MATRIX 1 feeds the rear speakers and has an OUTPUT DELAY of 900 ms. A delay speaker only needs a few tens of milliseconds to line up with the main PA (about 3 ms per metre of distance).',
+    ],
+    solution:
+      'The delay speakers are fed from MATRIX 1 (STEREO -> MATRIX 1 -> OMNI OUT 5), and the matrix output delay was set to 900 ms instead of a small alignment value. The audience heard the rear speakers almost a second after the main PA. Set the MATRIX 1 output delay to roughly the distance to the main PA divided by the speed of sound (e.g. 30 ms for about 10 m) - between 10 and 80 ms - and leave the delay switched ON. Turning the delay off would remove the echo but the rear speakers would then sound early, pulling the sound image towards the back. Concept: delay (fill) speakers are time-aligned with the main PA.',
+    trace: { from: 'bus:st:out', to: 'out:omni5' },
+    check: (ctx) => {
+      const m = ctx.state.buses.mtx1;
+      return result([
+        ['Main mix reaching the rear speakers (OMNI OUT 5)', reaches(ctx.gain('ch:ch1', 'out:omni5'))],
+        ['Rear speakers time-aligned with the PA', m.delayOn && m.delayMs >= 10 && m.delayMs <= 80],
+        ['Vocal still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch1', 'out:omni7'))],
+        ...live(ctx, 'Live signal at OMNI OUT 5', (c) => c.peak('out.omni5') > -60),
+      ]);
+    },
+  },
 ];

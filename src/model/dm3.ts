@@ -6,7 +6,10 @@
 //   - 16 analog mic/line inputs, 8 analog (OMNI) outputs
 //   - USB audio interface 18 in / 18 out
 //   - Dante 16 in / 16 out on the DM3 (not on the DM3 Standard)
-//   - 8 DCA groups, 2 internal FX racks
+//   - 2 internal FX racks, 6 mute groups, input + output delay 0-1000 ms,
+//     Dynamics 1 = gate/ducker, Dynamics 2 = compressor, GEQ on STEREO + MIX 1-6,
+//     oscillator: sine / pink noise / burst noise (published spec listings)
+//   - DCA groups: published listings disagree, so this is marked as unverified
 // Anything this file marks "simulator" is a training simplification.
 
 import type { BusDef, ChannelDef, ConsoleModel, InPortDef, OutPortDef, PatchSourceDef } from './types';
@@ -84,12 +87,16 @@ export function buildDm3Model(withDante: boolean): ConsoleModel {
     outPorts,
     patchSources,
     dcaCount: 8,
+    muteGroupCount: 6,
+    geqBuses: ['st', 'mix1', 'mix2', 'mix3', 'mix4', 'mix5', 'mix6'],
+    maxDelayMs: 1000,
     fxRackCount: 2,
     haGainRange: [-6, 66],
     digitalGainRange: [-96, 24],
     notes: [
       'Channel counts, buses and I/O follow the published DM3 specifications.',
-      'Processing is simplified: GATE/DUCKER, GEQ, channel delay, mute groups and the internal 96 kHz engine are not simulated.',
+      'Processing uses browser Web Audio filters/compressor and a custom gate worklet; curves and timing approximate the DM3, not Yamaha\'s exact algorithms.',
+      'DCA groups: published DM3 spec listings disagree on DCA availability; the simulator provides 8 DCAs for practice. Verify on your console and firmware.',
       'The browser runs at its own sample rate (usually 44.1 or 48 kHz).',
     ],
   };

@@ -89,6 +89,27 @@ const SCENARIO_FIX: Record<string, Fix> = {
     s.channels.stin.sends.mix2.on = true;
     s.outPorts.omni2.att = 0;
   },
+  'phantom-off-condenser': (s) => {
+    s.ports.in1.phantom = true;
+  },
+  'mute-group-engaged': (s) => {
+    s.muteGroups[0].on = false;
+  },
+  'gate-chopping-vocal': (s) => {
+    s.channels.ch1.gate.on = false;
+  },
+  'oscillator-left-on': (s) => {
+    s.osc.on = false;
+  },
+  'talkback-latched': (s) => {
+    s.talkback.on = false;
+  },
+  'ducker-wrong-key': (s) => {
+    s.channels.stin.gate.key = 'ch1';
+  },
+  'delay-misaligned': (s) => {
+    s.buses.mtx1.delayMs = 30;
+  },
 };
 
 /** Plausible wrong "fixes" that must be rejected. */
@@ -146,13 +167,125 @@ const SCENARIO_BAD: Record<string, Fix[]> = {
       s.channels.stin.sends.mix2.on = true; // output attenuator still at -inf
     },
   ],
+  'phantom-off-condenser': [
+    (_s, r) => {
+      r.kinds.p1 = 'line'; // pretending it is a line source hides the lesson
+    },
+    (s, r) => {
+      r.plugs.in1 = { device: 'p2', ch: 'SUM' }; // plug something else in
+      s.ports.in1.phantom = true;
+    },
+    (s) => {
+      s.ports.in1.phantom = true;
+      s.ports.in1.gain = 60; // phantom on but gain absurd
+    },
+    (s) => {
+      s.ports.in1.phantom = true;
+      s.channels.ch1.on = false;
+    },
+  ],
+  'mute-group-engaged': [
+    (s) => {
+      s.muteGroups[0].on = false;
+      s.channels.ch2.on = false; // fixed it by muting the drums
+    },
+    (s) => {
+      s.muteGroups[0].on = false;
+      s.channels.ch6.on = false; // keys muted again
+    },
+    (s) => {
+      s.channels.ch1.muteGroups = []; // keys still stuck in the engaged group
+    },
+    (s) => {
+      s.muteGroups[0].on = false;
+      s.buses.mix3.on = false; // drum wedge killed
+    },
+  ],
+  'gate-chopping-vocal': [
+    (s) => {
+      s.channels.ch1.gate.threshold = -25; // still too high
+    },
+    (s) => {
+      s.channels.ch1.gate.range = -10; // threshold still way too high
+    },
+    (s) => {
+      s.channels.ch1.gate.on = false;
+      s.channels.ch1.fader = NEG_INF;
+    },
+    (s) => {
+      s.channels.ch1.gate.mode = 'ducker'; // a ducker keyed from itself is no cure
+      s.channels.ch1.gate.threshold = -50;
+    },
+  ],
+  'oscillator-left-on': [
+    (s) => {
+      s.osc.level = -80; // still on and assigned to the wedges
+    },
+    (s) => {
+      for (const b of ['mix1', 'mix2', 'mix3', 'mix4']) s.buses[b].on = false; // muting the wedges
+    },
+    (s) => {
+      s.osc.assign = ['st']; // moved the noise into the PA
+    },
+    (s) => {
+      s.outPorts.omni1.source = null;
+      s.osc.on = false;
+    },
+  ],
+  'talkback-latched': [
+    (s) => {
+      s.buses.mix1.on = false;
+      s.buses.mix2.on = false;
+      s.buses.mix3.on = false;
+      s.buses.mix4.on = false;
+    },
+    (s) => {
+      s.talkback.level = NEG_INF; // still latched on and assigned
+    },
+    (s) => {
+      s.talkback.on = false;
+      s.channels.ch1.sends.mix1.on = false;
+    },
+  ],
+  'ducker-wrong-key': [
+    (s) => {
+      s.channels.stin.gate.key = 'self';
+    },
+    (s) => {
+      s.channels.stin.gate.key = 'ch1';
+      s.channels.stin.gate.mode = 'gate'; // a gate keyed by the vocal does the opposite
+    },
+    (s) => {
+      s.channels.stin.gate.key = 'ch1';
+      s.channels.stin.gate.range = -80; // ducks the backing out completely
+    },
+    (s) => {
+      s.channels.stin.gate.on = false;
+      s.channels.stin.on = false; // backing muted instead
+    },
+  ],
+  'delay-misaligned': [
+    (s) => {
+      s.buses.mtx1.delayOn = false; // echo gone, alignment lost
+    },
+    (s) => {
+      s.buses.mtx1.delayMs = 0;
+    },
+    (s) => {
+      s.buses.mtx1.delayMs = 400; // still an echo
+    },
+    (s) => {
+      s.buses.mtx1.delayMs = 30;
+      s.buses.mtx1.on = false; // silenced the speakers
+    },
+  ],
 };
 
 describe('scenarios', () => {
   it('has the required ids, unique', () => {
     const ids = SCENARIOS.map((x) => x.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBeGreaterThanOrEqual(13);
+    expect(ids.length).toBeGreaterThanOrEqual(20);
     for (const sc of SCENARIOS) {
       expect(sc.hints.length).toBe(3);
       expect(sc.id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
@@ -343,6 +476,34 @@ const EX_SOLUTION: Record<string, Fix> = {
     for (const id of ['ch2', 'ch3', 'ch4']) s.channels[id].sends.mix3 = { on: true, level: -3, pre: true, pan: 0 };
     s.channels.ch1.sends.fx1 = { on: true, level: -10, pre: false, pan: 0 };
   },
+  'phantom-power': (s) => {
+    s.ports.in1.phantom = true;
+    s.ports.in1.gain = 10;
+  },
+  'noise-gate': (s) => {
+    s.channels.ch3.gate = { on: true, mode: 'gate', threshold: -30, range: -40, attack: 1, hold: 50, decay: 150, key: 'self' };
+  },
+  'mute-groups': (s) => {
+    for (const id of ['ch2', 'ch3', 'ch4']) s.channels[id].muteGroups = [2];
+    s.muteGroups[1].on = true;
+  },
+  'input-to-matrix': (s) => {
+    s.channels.ch1.sends.mtx1 = { on: true, level: -6, pre: false, pan: 0 };
+  },
+  'ducking-backing': (s) => {
+    s.channels.stin.gate = { on: true, mode: 'ducker', threshold: -30, range: -12, attack: 10, hold: 100, decay: 400, key: 'ch1' };
+  },
+  'ring-out-with-osc': (s) => {
+    s.osc = { on: true, type: 'pink', freq: 1000, level: -20, assign: ['mix1'] };
+    s.buses.mix1.geqOn = true;
+    s.buses.mix1.geq[17] = -6;
+  },
+  'delay-speaker-alignment': (s) => {
+    s.buses.st.mtxSends.mtx1 = { on: true, level: 0 };
+    s.outPorts.omni5.source = 'mtx1';
+    s.buses.mtx1.delayOn = true;
+    s.buses.mtx1.delayMs = 40;
+  },
 };
 
 /** Exercises that are pure state/routing: signal only matters while audio runs. */
@@ -352,6 +513,7 @@ const HARD = new Set([
   'adjust-input-gain',
   'trace-input-to-output',
   'clipping-and-gain-staging',
+  'phantom-power',
 ]);
 /** Whose initial (post-setup) state already satisfies the check once signal is stubbed in. */
 const SIGNAL_ONLY = new Set(['confirm-input-signal', 'adjust-input-gain', 'trace-input-to-output']);
@@ -361,9 +523,9 @@ const NO_SIGNAL = new Set(['fader-and-mute', 'sends-on-fader', 'patch-bus-to-out
 describe('exercises', () => {
   it('counts and ordering', () => {
     const byLevel = (l: string) => EXERCISES.filter((e) => e.level === l).length;
-    expect(byLevel('beginner')).toBe(10);
-    expect(byLevel('intermediate')).toBe(6);
-    expect(byLevel('advanced')).toBe(5);
+    expect(byLevel('beginner')).toBe(11);
+    expect(byLevel('intermediate')).toBe(9);
+    expect(byLevel('advanced')).toBe(8);
     expect(new Set(EXERCISES.map((e) => e.id)).size).toBe(EXERCISES.length);
     const order = EXERCISES.map((e) => e.level);
     expect(order).toEqual([...order].sort((a, b) => ['beginner', 'intermediate', 'advanced'].indexOf(a) - ['beginner', 'intermediate', 'advanced'].indexOf(b)));
@@ -445,6 +607,159 @@ describe('exercises', () => {
       const ex = get('connect-microphone');
       ex.setup?.(s, r, model);
       expect(ex.check(makeCtx(model, s, r, loud)).ok).toBe(false);
+    }
+  });
+
+  it('new-feature exercises: specific negative cases', () => {
+    const get = (id: string) => EXERCISES.find((e) => e.id === id)!;
+    const run = (id: string, mutate: Fix, o?: Opts) => {
+      const { model, s, r } = fresh();
+      const ex = get(id);
+      ex.setup?.(s, r, model);
+      EX_SOLUTION[id](s, r);
+      mutate(s, r);
+      return ex.check(makeCtx(model, s, r, o)).ok;
+    };
+    // phantom: gain too hot / too quiet by signal; phantom missing
+    expect(run('phantom-power', (s) => { s.ports.in1.phantom = false; }, loud)).toBe(false);
+    expect(run('phantom-power', () => {}, { audio: true, peak: () => -2, playing: true })).toBe(false);
+    expect(run('phantom-power', () => {}, { audio: true, peak: () => -40, playing: true })).toBe(false);
+    expect(run('phantom-power', () => {}, { audio: true, peak: () => -20, playing: true })).toBe(true);
+    // gate: threshold out of range, wrong mode, shallow range
+    expect(run('noise-gate', (s) => { s.channels.ch3.gate.threshold = -50; })).toBe(false);
+    expect(run('noise-gate', (s) => { s.channels.ch3.gate.threshold = -10; })).toBe(false);
+    expect(run('noise-gate', (s) => { s.channels.ch3.gate.range = -10; })).toBe(false);
+    expect(run('noise-gate', (s) => { s.channels.ch3.gate.mode = 'ducker'; })).toBe(false);
+    expect(run('noise-gate', (s) => { s.channels.ch3.gate.on = false; })).toBe(false);
+    // mute group: group not engaged, one drum missing, muted with ON key instead, vocal in group
+    expect(run('mute-groups', (s) => { s.muteGroups[1].on = false; })).toBe(false);
+    expect(run('mute-groups', (s) => { s.channels.ch4.muteGroups = []; })).toBe(false);
+    expect(run('mute-groups', (s) => { s.channels.ch1.muteGroups = [2]; })).toBe(false);
+    expect(run('mute-groups', (s) => { s.channels.ch2.on = false; })).toBe(false);
+    // matrix send
+    expect(run('input-to-matrix', (s) => { s.channels.ch1.sends.mtx1.on = false; })).toBe(false);
+    expect(run('input-to-matrix', (s) => { s.channels.ch1.sends.mtx1.level = -30; })).toBe(false);
+    expect(run('input-to-matrix', (s) => { s.channels.ch1.toSt = false; })).toBe(false);
+    // ducker
+    expect(run('ducking-backing', (s) => { s.channels.stin.gate.mode = 'gate'; })).toBe(false);
+    expect(run('ducking-backing', (s) => { s.channels.stin.gate.key = 'self'; })).toBe(false);
+    expect(run('ducking-backing', (s) => { s.channels.stin.gate.range = -40; })).toBe(false);
+    expect(run('ducking-backing', (s) => { s.channels.stin.gate.range = -3; })).toBe(false);
+    // oscillator ring-out
+    expect(run('ring-out-with-osc', (s) => { s.osc.assign = ['mix1', 'mix2']; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.osc.assign = ['st']; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.osc.on = false; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.osc.type = 'sine'; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.buses.mix1.geqOn = false; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.buses.mix1.geq[17] = -1; })).toBe(false);
+    expect(run('ring-out-with-osc', (s) => { s.buses.mix1.on = false; })).toBe(false);
+    // delay speakers
+    expect(run('delay-speaker-alignment', (s) => { s.buses.mtx1.delayMs = 5; })).toBe(false);
+    expect(run('delay-speaker-alignment', (s) => { s.buses.mtx1.delayMs = 200; })).toBe(false);
+    expect(run('delay-speaker-alignment', (s) => { s.buses.mtx1.delayOn = false; })).toBe(false);
+    expect(run('delay-speaker-alignment', (s) => { s.outPorts.omni5.source = 'mix5'; })).toBe(false);
+    expect(run('delay-speaker-alignment', (s) => { s.buses.st.mtxSends.mtx1.level = -40; })).toBe(false);
+  });
+
+  it('new-feature exercises: soft ones pass with audio off', () => {
+    for (const id of ['noise-gate', 'mute-groups', 'input-to-matrix', 'ducking-backing', 'ring-out-with-osc', 'delay-speaker-alignment']) {
+      const { model, s, r } = fresh();
+      const ex = EXERCISES.find((e) => e.id === id)!;
+      ex.setup?.(s, r, model);
+      EX_SOLUTION[id](s, r);
+      const res = ex.check(makeCtx(model, s, r));
+      expect(res.ok, `${id}: ${res.detail.join(' | ')}`).toBe(true);
+    }
+  });
+});
+
+describe('new-feature scenarios: extra checks', () => {
+  const get = (id: string) => SCENARIOS.find((x) => x.id === id)!;
+
+  it('phantom: setup gives a silent condenser at +24 dB', () => {
+    const { model, s, r } = fresh();
+    get('phantom-off-condenser').setup(s, r, model);
+    expect(r.kinds.p1).toBe('condenser');
+    expect(s.ports.in1.gain).toBe(24);
+    expect(s.ports.in1.phantom).toBe(false);
+    const g = buildRoutingGraph(model, s, r);
+    expect(gainToDb(pathGain(g, 'dev:p1', 'ch:ch1'))).toBe(NEG_INF);
+  });
+
+  it('phantom: live level must have headroom', () => {
+    const sc = get('phantom-off-condenser');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    s.ports.in1.phantom = true;
+    expect(sc.check(makeCtx(model, s, r, { audio: true, peak: () => -1, playing: true })).ok).toBe(false);
+    expect(sc.check(makeCtx(model, s, r, { audio: true, peak: () => -14, playing: true })).ok).toBe(true);
+  });
+
+  it('mute group: either disengaging or removing the members works', () => {
+    const sc = get('mute-group-engaged');
+    for (const fix of [
+      (s: ConsoleState) => {
+        s.muteGroups[0].on = false;
+      },
+      (s: ConsoleState) => {
+        s.channels.ch1.muteGroups = [];
+        s.channels.ch6.muteGroups = [];
+      },
+    ]) {
+      const { model, s, r } = fresh();
+      sc.setup(s, r, model);
+      fix(s);
+      expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+    }
+  });
+
+  it('gate: threshold fix and live gate reduction', () => {
+    const sc = get('gate-chopping-vocal');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    s.channels.ch1.gate.threshold = -40;
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+    expect(sc.check(makeCtx(model, s, r, { ...loud, gr: () => -5 })).ok).toBe(true);
+    expect(sc.check(makeCtx(model, s, r, { ...loud, gr: () => -45 })).ok).toBe(false);
+    s.channels.ch1.gate.threshold = -35;
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+    s.channels.ch1.gate.threshold = -34;
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(false);
+  });
+
+  it('oscillator / talkback: unassigning wedges also fixes', () => {
+    {
+      const sc = get('oscillator-left-on');
+      const { model, s, r } = fresh();
+      sc.setup(s, r, model);
+      s.osc.assign = [];
+      expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+    }
+    {
+      const sc = get('talkback-latched');
+      const { model, s, r } = fresh();
+      sc.setup(s, r, model);
+      s.talkback.assign = [];
+      expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+    }
+  });
+
+  it('ducker: switching it off is accepted', () => {
+    const sc = get('ducker-wrong-key');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    s.channels.stin.gate.on = false;
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+  });
+
+  it('delay: matrix feeds OMNI 5 at setup and the alignment window is 10-80 ms', () => {
+    const sc = get('delay-misaligned');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    expect(s.outPorts.omni5.source).toBe('mtx1');
+    for (const [ms, ok] of [[10, true], [80, true], [9, false], [81, false]] as const) {
+      s.buses.mtx1.delayMs = ms;
+      expect(sc.check(makeCtx(model, s, r)).ok, `${ms} ms`).toBe(ok);
     }
   });
 });

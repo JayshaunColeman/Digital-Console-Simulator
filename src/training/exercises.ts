@@ -376,6 +376,47 @@ export const EXERCISES: Exercise[] = [
       ),
   },
 
+  {
+    id: 'phantom-power',
+    level: 'beginner',
+    title: 'Phantom power for a condenser mic',
+    goal: 'A condenser vocal mic is plugged into INPUT 1 but the channel is silent. Switch on +48V and set the gain so INPUT 1 peaks between -24 and -6 dBFS.',
+    steps: [
+      'Press POWER, then PLAY ALL on the SOURCES screen so the vocal is playing (the vocal is now a condenser mic).',
+      'Open the I/O PATCH tab. Under INPUT SOCKETS find INPUT 1: the INPUT 1 meter shows nothing, even though a mic is plugged in.',
+      'Switch +48V on for INPUT 1 (the +48V column on I/O PATCH, or the +48V key next to HA GAIN in SELECTED CH > INPUT for channel 1).',
+      'Now raise HA GAIN until the INPUT 1 peaks sit between -24 and -6 dBFS (aim for about -12).',
+    ],
+    hints: [
+      'Condenser microphones contain active electronics that are powered from the console over the microphone cable: that is what phantom power (+48V) is for.',
+      'Dynamic microphones do not need +48V; a condenser makes no sound at all without it.',
+      'With +48V on and the gain still at 0 dB the signal will be very quiet: raise HA GAIN a little at a time while the vocal is playing.',
+    ],
+    setup: (s: ConsoleState, r: RigState) => {
+      r.kinds.p1 = 'condenser';
+      s.ports.in1.phantom = false;
+      s.ports.in1.gain = 0;
+    },
+    check: (ctx) => {
+      const items: Item[] = [
+        ['A condenser mic is plugged into INPUT 1', ctx.rig.kinds.p1 === 'condenser' && ctx.rig.plugs.in1?.device === 'p1'],
+        ['+48V is on for INPUT 1', ctx.state.ports.in1.phantom],
+        ['Signal can travel from the mic to channel 1', ctx.gain('dev:p1', 'ch:ch1') > -10],
+      ];
+      return hard(
+        items,
+        (c) => {
+          const p = c.peak('port.in1');
+          return [
+            ['The vocal player is playing', c.playing(0)],
+            ['INPUT 1 peaks between -24 and -6 dBFS', p >= -24 && p <= -6],
+          ];
+        },
+        ctx,
+      );
+    },
+  },
+
   // ======================================================== INTERMEDIATE ====
   {
     id: 'vocal-monitor-mix',
@@ -590,6 +631,112 @@ export const EXERCISES: Exercise[] = [
     },
   },
 
+  {
+    id: 'noise-gate',
+    level: 'intermediate',
+    title: 'Gate the snare',
+    goal: 'Use the gate (Dynamics 1) on the snare channel to cut the spill between hits: gate on, threshold between -40 and -15 dBFS, range of -20 dB or deeper.',
+    steps: [
+      'Select channel 3 (Snare) and open SELECTED CH > DYNAMICS 1 · GATE/DUCKER.',
+      'Make sure the mode is GATE (not DUCKER) and the key source is SELF, then switch the gate ON.',
+      'Press POWER and PLAY ALL, then watch the gate gain-reduction meter while the snare plays.',
+      'Set the THRESHOLD between -40 and -15 dBFS so the gate opens on each snare hit, and set the RANGE to -20 dB or deeper so the gaps are properly quiet.',
+    ],
+    hints: [
+      'A gate closes (attenuates by RANGE) when the signal falls below the THRESHOLD and opens again when it rises above it.',
+      'If the threshold is too high the gate also chops the snare itself; too low and it never closes.',
+      'ATTACK should be fast (about 1 ms) so the front of each hit is not lost; HOLD and DECAY control how the tail closes.',
+    ],
+    check: (ctx) => {
+      const g = ctx.state.channels.ch3.gate;
+      return soft(
+        [
+          ['Snare gate is on', g.on],
+          ['Mode is GATE, keyed from the snare itself', g.mode === 'gate' && g.key === 'self'],
+          ['Threshold between -40 and -15 dBFS', g.threshold >= -40 && g.threshold <= -15],
+          ['Range -20 dB or deeper', g.range <= -20],
+          ['Snare still reaching the PA (OMNI OUT 7)', ctx.gain('ch:ch3', 'out:omni7') > -40],
+        ],
+        [['Snare is playing (channel 3 input meter)', ctx.peak('ch.ch3.in') > -60]],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'mute-groups',
+    level: 'intermediate',
+    title: 'Mute the drums with a mute group',
+    goal: 'Put the kick, snare and hi-hat in MUTE GROUP 2 and engage it, so all the drums go silent at once while the vocal keeps playing.',
+    steps: [
+      'Select channel 2 (Kick) and, in SELECTED CH > MUTE GROUP, press assign key 2. Do the same for channel 3 (Snare) and channel 4 (Hi-Hat).',
+      'Leave every channel ON key and fader alone - the mute group does the muting.',
+      'In the MASTER section, press MUTE GROUPS key 2 to engage the group.',
+      'Check SIGNAL FLOW or the meters: the drums are gone from the main mix and from Wedge 3, but the vocal is untouched.',
+    ],
+    hints: [
+      'Assigning a channel to a mute group does nothing until the group itself is engaged with its MASTER section key.',
+      'The group mutes the channels including their sends, so the drum wedge falls silent too.',
+      'The vocal channel must NOT be in group 2.',
+    ],
+    setup: (s: ConsoleState) => {
+      for (const id of ['ch2', 'ch3', 'ch4']) setSend(s, id, 'mix3', -3);
+    },
+    check: (ctx) => {
+      const drums = ['ch2', 'ch3', 'ch4'];
+      const chs = ctx.state.channels;
+      return soft(
+        [
+          ['Kick, snare and hi-hat are all assigned to mute group 2', drums.every((id) => chs[id].muteGroups.includes(2))],
+          ['Mute group 2 is engaged', !!ctx.state.muteGroups[1]?.on],
+          [
+            'The drums are silent in the main mix (STEREO)',
+            drums.every((id) => ctx.gain(`ch:${id}`, 'bus:st:out') <= NEG_INF),
+          ],
+          [
+            'The drums are silent in Wedge 3 too',
+            drums.every((id) => ctx.gain(`ch:${id}`, 'out:omni3') <= NEG_INF),
+          ],
+          ['The drum channels were muted by the group, not by their ON keys or faders', drums.every((id) => chs[id].on && chs[id].fader > NEG_INF)],
+          ['The vocal still passes to the main mix', ctx.gain('ch:ch1', 'bus:st:out') > -40 && !chs.ch1.muteGroups.includes(2)],
+        ],
+        [['Vocal signal present (channel 1 post-fader)', ctx.peak('ch.ch1.post') > -60]],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'input-to-matrix',
+    level: 'intermediate',
+    title: 'Send the vocal straight to a matrix',
+    goal: 'Feed a broadcast / recording feed: send the vocal channel directly to MATRIX 1 (send on, level above -20 dB) so it reaches MATRIX 1 at better than -30 dB.',
+    steps: [
+      'Select channel 1 (Vocal) and open SELECTED CH > ROUTING · SENDS.',
+      'In the sends table find the MATRIX rows (MTX 1, MTX 2).',
+      'Switch the MTX 1 send on and raise its level above -20 dB (about -6 dB is a good start).',
+      'Check in SIGNAL FLOW that ch1 now reaches MATRIX 1, and with audio running watch the MATRIX 1 bus meter.',
+    ],
+    hints: [
+      'Channels can send directly to a matrix bus, in the same way as to a mix bus; the matrix does not have to be fed from STEREO or a MIX.',
+      'The send must be ON and have a level: a send at -infinity is silent even when switched on.',
+      'The vocal must stay in the main mix as well - you are adding a feed, not moving the vocal.',
+    ],
+    check: (ctx) => {
+      const s = ctx.state.channels.ch1.sends.mtx1;
+      return soft(
+        [
+          ['MATRIX 1 send from the vocal is on', s.on],
+          ['Send level above -20 dB (and not extreme)', s.level > -20 && s.level <= 6],
+          ['Vocal reaches MATRIX 1 at better than -30 dB', ctx.gain('ch:ch1', 'bus:mtx1') > -30],
+          ['Vocal still in the main mix', ctx.gain('ch:ch1', 'out:omni7') > -40],
+        ],
+        [['Signal on the MATRIX 1 bus', ctx.peak('bus.mtx1.in') > -60]],
+        ctx,
+      );
+    },
+  },
+
   // ============================================================ ADVANCED ====
   {
     id: 'diagnose-multiple-faults',
@@ -787,6 +934,112 @@ export const EXERCISES: Exercise[] = [
           ['Signal at OMNI OUT 1', ctx.peak('out.omni1') > -60],
           ['Signal at OMNI OUT 3', ctx.peak('out.omni3') > -60],
         ],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'ducking-backing',
+    level: 'advanced',
+    title: 'Duck the backing track under the vocal',
+    goal: 'Use the ducker on the backing track (ST IN): Dynamics 1 on, mode DUCKER, key from channel 1 (the vocal), range between -20 and -6 dB.',
+    steps: [
+      'Select the ST IN channel (Backing) and open SELECTED CH > DYNAMICS 1 · GATE/DUCKER.',
+      'Change the mode from GATE to DUCKER and switch Dynamics 1 ON.',
+      'Set the KEY source to channel 1 (Vocal) so the ducker listens to the singer rather than the backing track itself.',
+      'Set the RANGE between -20 and -6 dB, the THRESHOLD around the level of the vocal, and a slowish DECAY (300 ms or more) so the backing swells back smoothly.',
+      'Play the band and watch the ducker meter dip whenever the vocal is loud.',
+    ],
+    hints: [
+      'A ducker lowers its own channel by RANGE while the key signal is above the threshold - the opposite of a gate.',
+      'KEY = SELF would duck the backing track by its own level, which is not what we want. Pick channel 1.',
+      'RANGE is how far the backing dips: -6 dB is subtle, -20 dB is dramatic.',
+    ],
+    check: (ctx) => {
+      const g = ctx.state.channels.stin.gate;
+      return soft(
+        [
+          ['Backing track dynamics 1 is on', g.on],
+          ['Mode is DUCKER', g.mode === 'ducker'],
+          ['Keyed from channel 1 (the vocal)', g.key === 'ch1'],
+          ['Range between -20 and -6 dB', g.range >= -20 && g.range <= -6],
+          ['Backing track still reaching the PA (OMNI OUT 7)', ctx.gain('ch:stin', 'out:omni7') > -40],
+        ],
+        [
+          ['Backing track is playing', ctx.peak('ch.stin.in') > -60],
+          ['Vocal key signal is present (channel 1 input meter)', ctx.peak('ch.ch1.in') > -60],
+        ],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'ring-out-with-osc',
+    level: 'advanced',
+    title: 'Ring out a wedge with the oscillator',
+    goal: 'Use the console oscillator to ring out Wedge 1: pink noise on and assigned to MIX 1 only, with the MIX 1 graphic EQ on and at least one band cut by 3 dB or more.',
+    steps: [
+      'Open the MASTER section and find the OSCILLATOR block. Set the type to PINK noise and a modest level (-20 dBFS is plenty).',
+      'Assign the oscillator to MIX 1 only (press the MIX 1 assign key, and make sure no other bus is lit), then switch the oscillator ON.',
+      'Select the MIX 1 bus and open its GEQ (31 band). Switch the GEQ ON.',
+      'Listen to Wedge 1 (LISTEN selector on I/O PATCH) for a ringing or harsh frequency, and pull that band down by at least 3 dB.',
+      'Switch the oscillator OFF when you are finished.',
+    ],
+    hints: [
+      'Ringing out means finding the frequencies where the wedge + mic feeds back first, and notching them out on the monitor GEQ.',
+      'Assign the oscillator only to the bus you are working on - anything else would put noise in the PA or in other wedges.',
+      'Keep the oscillator level low; pink noise through a wedge is very fatiguing.',
+    ],
+    check: (ctx) => {
+      const o = ctx.state.osc;
+      const mix1 = ctx.state.buses.mix1;
+      const cut = Math.min(...mix1.geq);
+      return soft(
+        [
+          ['Oscillator is on and set to pink noise', o.on && o.type === 'pink'],
+          ['Oscillator assigned to MIX 1 only', o.assign.length === 1 && o.assign[0] === 'mix1'],
+          ['Oscillator level is moderate (-10 dBFS or lower)', o.level <= -10],
+          ['Oscillator reaches Wedge 1 (OMNI OUT 1) and nothing else', ctx.gain('osc', 'out:omni1') > -50 && ctx.gain('osc', 'out:omni7') < -40],
+          ['MIX 1 graphic EQ is on', mix1.geqOn],
+          ['At least one GEQ band cut by 3 dB or more', cut <= -3],
+        ],
+        [['Oscillator signal present (meter)', ctx.peak('osc') > -70]],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'delay-speaker-alignment',
+    level: 'advanced',
+    title: 'Time-align the delay speakers',
+    goal: 'Feed MATRIX 1 from STEREO (send above -20 dB), patch MATRIX 1 to OMNI OUT 5 and set its output delay between 20 and 60 ms.',
+    steps: [
+      'Select the STEREO bus and open its MATRIX sends. Switch the MTX 1 send on and raise it above -20 dB (0 dB is typical).',
+      'Open I/O PATCH > OUTPUT PATCH and select MATRIX 1 as the source of OMNI OUT 5 (replacing the IEM mix).',
+      'Select MATRIX 1 and open OUTPUT DELAY. Switch the delay ON.',
+      'Set the delay between 20 and 60 ms: sound travels about 1 m every 3 ms, so 10 m between the main PA and the rear speakers is about 30 ms.',
+      'Play the band and check OMNI OUT 5 carries the mix.',
+    ],
+    hints: [
+      'Delay (fill) speakers must be delayed so their sound arrives together with the main PA sound reaching the same listeners.',
+      'The delay belongs on the matrix output that feeds those speakers, not on every channel.',
+      'Too little delay and the rear speakers pull the sound image to the back; too much and the audience hears an echo.',
+    ],
+    check: (ctx) => {
+      const send = ctx.state.buses.st.mtxSends.mtx1;
+      const m = ctx.state.buses.mtx1;
+      return soft(
+        [
+          ['STEREO feeds MATRIX 1 (send on, above -20 dB)', !!send && send.on && send.level > -20 && send.level <= 6],
+          ['MATRIX 1 patched to OMNI OUT 5', ctx.state.outPorts.omni5.source === 'mtx1'],
+          ['Main mix reaches OMNI OUT 5', ctx.gain('ch:ch1', 'out:omni5') > -40],
+          ['MATRIX 1 output delay is on and between 20 and 60 ms', m.delayOn && m.delayMs >= 20 && m.delayMs <= 60],
+          ['PA outputs still carry the mix', ctx.gain('ch:ch1', 'out:omni7') > -40],
+        ],
+        [['Signal at OMNI OUT 5', ctx.peak('out.omni5') > -60]],
         ctx,
       );
     },

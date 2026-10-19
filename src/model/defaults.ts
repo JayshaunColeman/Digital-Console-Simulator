@@ -3,6 +3,7 @@ import type {
   ChannelState,
   CompState,
   ConsoleModel,
+  GateState,
   ConsoleState,
   EqBand,
   OutPortState,
@@ -10,7 +11,10 @@ import type {
 } from './types';
 import { NEG_INF } from './types';
 
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
+
+/** ISO 1/3-octave centre frequencies used by the 31-band GEQ. */
+export const GEQ_FREQS = [20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000];
 
 export const defaultEq = (): EqBand[] => [
   { type: 'lowshelf', freq: 100, gain: 0, q: 0.7 },
@@ -27,6 +31,17 @@ export const defaultComp = (): CompState => ({
   release: 150,
   knee: 2,
   makeup: 0,
+});
+
+export const defaultGate = (): GateState => ({
+  on: false,
+  mode: 'gate',
+  threshold: -40,
+  range: -60,
+  attack: 1,
+  hold: 50,
+  decay: 150,
+  key: 'self',
 });
 
 const CH_PRESET: Record<string, { name: string; color: string; fader?: number }> = {
@@ -48,7 +63,7 @@ export function defaultChannel(model: ConsoleModel, id: string): ChannelState {
   const preset = CH_PRESET[id];
   const sends: ChannelState['sends'] = {};
   for (const b of model.buses) {
-    if (b.kind === 'mix' || b.kind === 'fx') {
+    if (b.kind === 'mix' || b.kind === 'fx' || b.kind === 'matrix') {
       sends[b.id] = { on: true, level: NEG_INF, pre: b.kind === 'mix', pan: 0 };
     }
   }
@@ -71,7 +86,11 @@ export function defaultChannel(model: ConsoleModel, id: string): ChannelState {
     hpfFreq: 80,
     eqOn: true,
     eq: defaultEq(),
+    gate: defaultGate(),
     comp: defaultComp(),
+    delayOn: false,
+    delayMs: 0,
+    muteGroups: [],
     on: true,
     fader: preset?.fader ?? NEG_INF,
     pan: 0,
@@ -96,6 +115,11 @@ export function defaultBus(model: ConsoleModel, id: string): BusState {
     eqOn: true,
     eq: defaultEq(),
     comp: defaultComp(),
+    geqOn: false,
+    geq: GEQ_FREQS.map(() => 0),
+    delayOn: false,
+    delayMs: 0,
+    muteGroups: [],
     cue: false,
     mtxSends,
     balance: 0,
@@ -120,7 +144,7 @@ export function defaultConsoleState(model: ConsoleModel): ConsoleState {
   const buses: ConsoleState['buses'] = {};
   for (const b of model.buses) buses[b.id] = defaultBus(model, b.id);
   const ports: ConsoleState['ports'] = {};
-  for (const p of model.inPorts) ports[p.id] = { gain: 0 };
+  for (const p of model.inPorts) ports[p.id] = { gain: 0, phantom: false };
   ports.in8.gain = 24; // browser microphone arrives at "mic level"
   return {
     version: STATE_VERSION,
@@ -130,9 +154,12 @@ export function defaultConsoleState(model: ConsoleModel): ConsoleState {
     ports,
     outPorts: defaultOutPatch(model),
     dcas: Array.from({ length: model.dcaCount }, (_, i) => ({ name: `DCA ${i + 1}`, level: 0, on: true })),
+    muteGroups: Array.from({ length: model.muteGroupCount }, (_, i) => ({ name: `MUTE ${i + 1}`, on: false })),
+    talkback: { on: false, source: 'in8', level: 0, assign: ['mix1', 'mix2', 'mix3', 'mix4'] },
+    osc: { on: false, type: 'pink', freq: 1000, level: -20, assign: [] },
     fx: [
-      { type: 'reverb-hall', time: 2.2, predelay: 20, feedback: 0, hiCut: 7000, loCut: 150 },
-      { type: 'delay-stereo', time: 400, predelay: 0, feedback: 0.35, hiCut: 5000, loCut: 150 },
+      { type: 'reverb-hall', time: 2.2, predelay: 20, feedback: 0, hiCut: 7000, loCut: 150, rate: 0.5, depth: 0.5 },
+      { type: 'delay-stereo', time: 400, predelay: 0, feedback: 0.35, hiCut: 5000, loCut: 150, rate: 0.5, depth: 0.5 },
     ],
     monitor: { source: 'st', cueMode: 'PFL', level: -10 },
   };
@@ -152,6 +179,7 @@ export function defaultRig(): RigState {
       usb17: { device: 'p7', ch: 'L' },
       usb18: { device: 'p7', ch: 'R' },
     },
+    kinds: { mic: 'dynamic' },
     generator: { type: 'sine', freq: 1000, level: -18, on: false },
     players: [
       { name: 'Vocal (synth)', source: 'stem', stem: 'vox', loop: true, level: 0 },
@@ -165,6 +193,7 @@ export function defaultRig(): RigState {
     ],
     micLevel: -20,
     listen: { mode: 'ports', l: 'omni7', r: 'omni8', volume: -6 },
+    output: { sinkId: '', mode: 'stereo' },
     outNames: {
       omni1: 'Wedge 1 (Vocal)',
       omni2: 'Wedge 2 (Keys)',
@@ -176,4 +205,37 @@ export function defaultRig(): RigState {
       omni8: 'FOH PA R',
     },
   };
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** Fill anything missing in `target` from `defaults` (recursively, objects only). */
+function fill(target: Record<string, unknown>, defaults: Record<string, unknown>) {
+  for (const [k, dv] of Object.entries(defaults)) {
+    const tv = target[k];
+    if (tv === undefined) target[k] = structuredClone(dv);
+    else if (isObj(tv) && isObj(dv)) fill(tv, dv);
+  }
+}
+
+/**
+ * Upgrade a stored console state (autosave, scene, import) from an older
+ * version of the simulator by filling every missing parameter with its default.
+ * Returns null if it is not a console state at all.
+ */
+export function migrateConsole(model: ConsoleModel, raw: unknown): ConsoleState | null {
+  if (!isObj(raw) || !isObj(raw.channels) || !isObj(raw.buses) || !isObj(raw.outPorts)) return null;
+  const v = typeof raw.version === 'number' ? raw.version : 0;
+  if (v < 1 || v > STATE_VERSION) return null;
+  const s = structuredClone(raw) as Record<string, unknown>;
+  fill(s, defaultConsoleState(model) as unknown as Record<string, unknown>);
+  s.version = STATE_VERSION;
+  return s as unknown as ConsoleState;
+}
+
+export function migrateRig(raw: unknown): RigState | null {
+  if (!isObj(raw) || !isObj(raw.plugs) || !Array.isArray(raw.players) || raw.players.length !== 8) return null;
+  const r = structuredClone(raw) as Record<string, unknown>;
+  fill(r, defaultRig() as unknown as Record<string, unknown>);
+  return r as unknown as RigState;
 }

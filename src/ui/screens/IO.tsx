@@ -2,7 +2,7 @@ import { useStore } from '../../state/store';
 import { Key, Knob, Meter, Section, Select, SignalLed } from '../controls';
 import { fmtDb } from '../../lib/db';
 import { NEG_INF } from '../../model/types';
-import { buildRoutingGraph, findLoops } from '../../engine/routing';
+import { buildRoutingGraph, findLoops, plugProblem } from '../../engine/routing';
 import { useMemo } from 'react';
 
 export function IOScreen() {
@@ -218,6 +218,7 @@ function InputSockets() {
             <th>Device</th>
             <th>Side</th>
             <th>HA GAIN</th>
+            <th>+48V</th>
             <th>Level (post HA)</th>
             <th>Feeds channel</th>
           </tr>
@@ -277,6 +278,16 @@ function InputSockets() {
                   ) : (
                     <small>digital</small>
                   )}
+                </td>
+                <td>
+                  {p.hasPreamp ? (
+                    <Key small kind="warn" on={c.ports[p.id].phantom} topic="phantom" testid={`io-phantom-${p.id}`} onClick={() => set((x) => void (x.ports[p.id].phantom = !c.ports[p.id].phantom))}>
+                      48V
+                    </Key>
+                  ) : (
+                    '—'
+                  )}
+                  {plugProblem(c, rig, p.id) ? <span className="tag bad" title={plugProblem(c, rig, p.id)!}>NO 48V</span> : null}
                 </td>
                 <td>
                   <Meter tap={`port.${p.id}`} height={14} width={120} label={`${p.label} level`} />

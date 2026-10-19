@@ -7,7 +7,7 @@
 // point to another. The audio engine builds the real DSP graph from the same
 // rules; the meters (measured from audio) confirm what this graph predicts.
 
-import type { ConsoleModel, ConsoleState, RigState } from '../model/types';
+import type { ConsoleModel, ConsoleState, DeviceKind, RigState } from '../model/types';
 import { NEG_INF } from '../model/types';
 import { pairKeyOf, pairPartner } from '../model/dm3';
 import { dbToLin } from '../lib/db';
@@ -40,11 +40,20 @@ export function isLinked(state: ConsoleState, busId: string): boolean {
   return !!(pk && state.pairLinked[pk]);
 }
 
-/** Combined DCA offset (dB) and DCA mute state for a channel. */
+/** Engaged mute group (name) muting a channel or bus, if any. */
+export function muteGroupFor(state: ConsoleState, groups: number[] | undefined): string | null {
+  for (const n of groups ?? []) {
+    const g = state.muteGroups?.[n - 1];
+    if (g?.on) return g.name;
+  }
+  return null;
+}
+
+/** Combined DCA offset (dB) and DCA / mute-group mute state for a channel. */
 export function dcaFor(state: ConsoleState, chId: string): { offset: number; muted: string | null } {
   const ch = state.channels[chId];
   let offset = 0;
-  let muted: string | null = null;
+  let muted: string | null = muteGroupFor(state, ch.muteGroups);
   for (const n of ch.dca) {
     const d = state.dcas[n - 1];
     if (!d) continue;
@@ -66,6 +75,19 @@ export function anyCue(state: ConsoleState): boolean {
   return (
     Object.values(state.channels).some((c) => c.cue) || Object.values(state.buses).some((b) => b.cue)
   );
+}
+
+export function deviceKind(rig: RigState, dev: string): DeviceKind {
+  return rig.kinds?.[dev] ?? 'line';
+}
+
+/** Why a device produces no signal at a port (e.g. condenser without +48V). */
+export function plugProblem(state: ConsoleState, rig: RigState, portId: string): string | null {
+  const plug = rig.plugs[portId];
+  if (!plug || plug.device.startsWith('loop:')) return null;
+  if (deviceKind(rig, plug.device) === 'condenser' && !state.ports[portId]?.phantom)
+    return `${deviceLabel(rig, plug.device)} is a condenser mic and ${portId.toUpperCase()} has +48V phantom power off`;
+  return null;
 }
 
 export function deviceLabel(rig: RigState, dev: string): string {
@@ -95,7 +117,8 @@ export function buildRoutingGraph(model: ConsoleModel, state: ConsoleState, rig:
         // a physical cable from an output socket back into an input socket
         add({ from: `out:${loop[1]}`, to: `port:${p.id}`, gain: 1, label: 'Loop cable', ctl: 'io:inputs' });
       } else {
-        add({ from: `dev:${plug.device}`, to: `port:${p.id}`, gain: 1, label: `Cable (${plug.ch})`, ctl: 'io:inputs' });
+        const prob = plugProblem(state, rig, p.id);
+        add({ from: `dev:${plug.device}`, to: `port:${p.id}`, gain: prob ? 0 : 1, label: `Cable (${plug.ch})`, why: prob ?? undefined, ctl: 'io:inputs' });
       }
     }
   }
@@ -144,10 +167,10 @@ export function buildRoutingGraph(model: ConsoleModel, state: ConsoleState, rig:
     if (c.kind === 'mono') {
       add({ from: `${id}:pre`, to: `psrc:dir_${c.id}`, gain: 1, label: 'Direct out (pre-fader)' });
     }
-    // sends to mix + fx buses
+    // sends to mix + fx + matrix buses
     for (const b of model.buses) {
-      if (b.kind !== 'mix' && b.kind !== 'fx') continue;
-      const gov = b.kind === 'mix' ? governingBusId(state, b.id) : b.id;
+      if (b.kind !== 'mix' && b.kind !== 'fx' && b.kind !== 'matrix') continue;
+      const gov = b.kind === 'fx' ? b.id : governingBusId(state, b.id);
       const s = ch.sends[gov];
       if (!s) continue;
       const g = s.on ? dbToLin(s.level) : 0;
@@ -181,13 +204,20 @@ export function buildRoutingGraph(model: ConsoleModel, state: ConsoleState, rig:
     const id = `bus:${b.id}`;
     labels.set(id, `${state.buses[b.id].name} bus`);
     labels.set(`${id}:out`, `${state.buses[b.id].name} master`);
-    const g = bs.on ? dbToLin(bs.fader) : 0;
+    const mg = muteGroupFor(state, bs.muteGroups);
+    const g = bs.on && !mg ? dbToLin(bs.fader) : 0;
     add({
       from: id,
       to: `${id}:out`,
       gain: g,
       label: 'Bus master (ON + fader)',
-      why: !bs.on ? `${bs.name}: bus master ON key is off (muted)` : bs.fader <= NEG_INF ? `${bs.name}: master fader at -∞` : undefined,
+      why: !bs.on
+        ? `${bs.name}: bus master ON key is off (muted)`
+        : mg
+          ? `${bs.name}: muted by ${mg}`
+          : bs.fader <= NEG_INF
+            ? `${bs.name}: master fader at -∞`
+            : undefined,
       ctl: `bus:${b.id}:master`,
     });
     if (b.kind === 'stereo') {
@@ -217,6 +247,17 @@ export function buildRoutingGraph(model: ConsoleModel, state: ConsoleState, rig:
       }
     }
     add({ from: state.monitor.cueMode === 'PFL' ? id : `${id}:out`, to: 'bus:cue', gain: sw(state.buses[b.id].cue), label: 'CUE' });
+  }
+
+  // ---- talkback + internal oscillator (can feed buses directly)
+  labels.set('tb', 'Talkback');
+  labels.set('osc', 'Oscillator');
+  if (state.talkback?.source) add({ from: `port:${state.talkback.source}`, to: 'tb', gain: 1, label: 'Talkback source' });
+  for (const b of state.talkback?.assign ?? []) {
+    add({ from: 'tb', to: `bus:${b}`, gain: state.talkback.on ? dbToLin(state.talkback.level) : 0, label: 'Talkback assign', why: 'Talkback is off' });
+  }
+  for (const b of state.osc?.assign ?? []) {
+    add({ from: 'osc', to: `bus:${b}`, gain: state.osc.on ? dbToLin(state.osc.level) : 0, label: 'Oscillator assign', why: 'Oscillator is off' });
   }
 
   // ---- monitor / cue

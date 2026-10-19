@@ -129,4 +129,52 @@ export const TOPICS: Record<string, { title: string; text: string }> = {
     title: 'Direct out',
     text: 'A copy of one channel (pre-fader, post-ON) that can be patched to any output, typically USB for multitrack recording.',
   },
+  gate: {
+    title: 'Gate (Dynamics 1)',
+    text: 'A gate turns the channel down by RANGE whenever the signal falls below THRESHOLD, cutting spill and noise between notes or drum hits. ATTACK sets how fast it opens, HOLD keeps it open briefly, DECAY sets how fast it closes. Too high a threshold chops the start and end of words.',
+  },
+  ducker: {
+    title: 'Ducker (Dynamics 1)',
+    text: 'A ducker turns this channel DOWN by RANGE while its KEY IN source is above THRESHOLD — e.g. background music dips automatically whenever the announcer (key) talks. The key is another channel, taken after its digital gain.',
+  },
+  delay: {
+    title: 'Delay (input / output)',
+    text: 'Input delay time-aligns sources (e.g. a mic and a DI on the same instrument). Output delay aligns delay/fill speakers with the main PA: sound travels about 34 cm per millisecond, so a speaker 10 m further out needs about 29 ms.',
+  },
+  'mute-group': {
+    title: 'Mute groups',
+    text: 'A mute group mutes all of its member channels and buses with one key (e.g. all band inputs during a speech). Members are assigned on the channel / bus screen. A forgotten engaged mute group is a classic "why is nothing working" fault.',
+  },
+  geq: {
+    title: 'Graphic EQ (31 band)',
+    text: 'A 1/3-octave graphic EQ inserted on an output bus. Used to tame room resonances and to "ring out" wedges: raise the gain until feedback starts, find the frequency, and cut that band a few dB.',
+  },
+  phantom: {
+    title: '+48V phantom power',
+    text: 'Condenser microphones need +48V phantom power from the console input to work; without it they produce no signal at all. Dynamic mics do not need it. Phantom into unbalanced line devices can damage them, so only switch it on where it is needed.',
+  },
+  talkback: {
+    title: 'Talkback',
+    text: 'Talkback routes the engineer\'s mic straight to selected buses (usually the monitor mixes) so the engineer can speak to performers. It bypasses the channel faders. A latched talkback key leaks the engineer\'s chatter into every wedge.',
+  },
+  osc: {
+    title: 'Oscillator',
+    text: 'The internal oscillator injects a test signal (sine, pink noise or burst noise) directly into selected buses — for checking lines, levels and speaker coverage, or ringing out wedges. Always switch it off afterwards.',
+  },
+  'recall-safe': {
+    title: 'Recall Safe',
+    text: 'Channels/buses marked Recall Safe keep their current settings when a scene is recalled — e.g. protect the presenter\'s mic or the PA processing while changing band scenes.',
+  },
+  focus: {
+    title: 'Scene Focus',
+    text: 'Focus limits what a particular scene recalls. A scene with only "Faders" focused will recall levels and mutes but leave patching, gains and EQ alone.',
+  },
+  'device-kind': {
+    title: 'Device type',
+    text: 'Line sources (players, keyboards) arrive hot and need little gain. Dynamic mics are about 30 dB quieter and need more head-amp gain. Condenser mics also need +48V phantom power on their input socket.',
+  },
+  'output-device': {
+    title: 'Audio output device',
+    text: 'Choose which audio interface the browser plays through. With a multichannel interface you can map OMNI OUT 1-8 to its physical outputs 1-8 and drive real speakers or wedges from the simulator.',
+  },
 };

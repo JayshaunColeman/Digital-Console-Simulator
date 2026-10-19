@@ -48,8 +48,8 @@ npm run build && npm run preview   # http://localhost:4173  (production build)
 | SOURCES | Players, demo band, microphone and generator. |
 | SCENES | Store, recall, delete, export and import scenes. Reset the console or the stage wiring. Switch between DM3 and DM3 Standard. |
 | SIGNAL FLOW | A dynamic trace of the selected channel or bus to every destination. Each block has a live signal LED, breaks are drawn in red with the reason, and clicking a block opens its controls. |
-| TRAINING | 13 fault-finding scenarios, including 2 with multiple faults, plus a random fault. Each one has hints, a "reveal signal path" option and a "reveal solution" option, and it detects automatically when you have fixed it. |
-| ACADEMY | 21 exercises (10 beginner, 6 intermediate, 5 advanced) with live checks. Progress is tracked and exercises can be repeated. |
+| TRAINING | 20 fault-finding scenarios (e.g. phantom off on a condenser, an engaged mute group, a gate chopping the vocal, a latched talkback, the oscillator left on, a ducker on the wrong key, misaligned delay speakers, feedback loops, wrong patches) plus a random fault. Each has hints, "reveal signal path" and "reveal solution", and it detects automatically when you have fixed it. |
+| ACADEMY | 28 exercises across beginner, intermediate and advanced, with live checks. Progress is tracked and exercises can be repeated. |
 
 **Learning mode** is on by default. Touch any control and the coach panel explains it, including channel fader vs send level vs bus master, pre vs post, output patch vs send, and the clipping stages.
 
@@ -90,30 +90,38 @@ Two consumers read the same state:
 ## Implemented vs not implemented
 
 **Implemented and working on real audio:**
-- Mic input, file players and the generator.
-- Input patch, HA gain with A/D clipping, digital gain, polarity, HPF (12 dB/oct), 4-band PEQ (shelf/peak), and a compressor (threshold/ratio/attack/release/knee/makeup, with the browser's hidden auto-makeup measured and removed).
-- ON, fader and pan.
-- ST assign; mix and FX sends with pre/post and pan on linked pairs; stereo-linked mix and matrix pairs.
-- Bus EQ, compressor and master.
-- Matrix sends from STEREO and MIX buses.
-- 8 DCAs.
-- CUE (PFL/AFL) with the monitor interrupting to the cue; monitor source selection; PHONES.
-- Output patch with attenuation and D/A clipping.
-- Direct outs, available as patch sources.
-- Reverb and delay racks.
-- Safety limiter and loop detection.
-- Scenes with export and import, and autosave.
-- Signal-flow trace, troubleshooting scenarios, the academy and the gain-staging panel.
+- **Inputs:** browser mic (stereo interfaces: L/R picks input 1/2), 8 file players (files saved in IndexedDB so they survive a reload), and a test generator (sine / pink / white / impulse / sweep / burst).
+- **Device types:** line, dynamic mic (30 dB lower) and condenser mic (needs **+48V phantom power** on its socket, otherwise silent).
+- **Channel processing:**
+  - Input patch, HA gain with A/D clipping, digital gain, polarity, HPF.
+  - 4-band PEQ.
+  - **Dynamics 1:** gate or ducker (AudioWorklet) with threshold, range, attack, hold, decay and **key-in** from another channel. It has an attenuation meter.
+  - **Dynamics 2:** compressor. The browser's hidden auto-makeup is measured and removed.
+  - **Input delay** 0–1000 ms.
+- **Channel → bus routing:**
+  - ON, fader, pan and ST assign.
+  - Mix, FX and **matrix** sends with pre/post and pan on linked pairs.
+  - Stereo-linked mix and matrix pairs.
+- **Buses:**
+  - EQ, compressor, **31-band GEQ** (STEREO + MIX 1-6), **output delay** 0–1000 ms, and master.
+  - Bus → matrix sends.
+- **Groups:** 8 DCAs and **6 mute groups**. Mute groups cover channels and buses.
+- **Talkback:** any input socket can be assigned to any buses.
+- **Internal oscillator:** sine, pink or burst noise, assigned straight to buses.
+- **Monitoring:** CUE (PFL/AFL) with the monitor interrupting to the cue, PHONES and monitor source.
+- **Outputs:** output patch with attenuation and D/A clipping, plus direct outs.
+- **Browser output device selection** (Chrome/Edge). **Multichannel mode** sends OMNI OUT 1-8 to the outputs of an audio interface with more than 2 outputs, so the simulator can drive real wedges.
+- **FX racks**, 10 algorithm families: hall, room and plate reverb, early reflections, ping-pong and mono delay (with **tap tempo**), chorus, flanger, phaser, tremolo.
+- **Scenes:** store, recall and delete, with per-scene **Focus** (which parameter groups recall), **Recall Safe** per channel and bus, export/import, autosave, and automatic upgrade of saves from older versions.
+- **Learning tools:** signal-flow trace (now showing gate/delay and phantom faults), 20 troubleshooting scenarios, 28 academy exercises, and the gain-staging panel.
 
-**Not simulated** (each is labeled in the UI where it applies):
-- Gate/ducker, GEQ inserts, channel delay, mute groups, and input-channel → matrix sends.
-- The full DM3 effect library: only reverb and delay families are included.
-- Phantom power and pads.
-- Recall safe and focus.
-- Talkback and oscillator-to-bus routing.
-- Mix-minus and other advanced patch features.
-- Remote and Editor connectivity.
-- Real Dante or USB hardware. These ports exist only as patch points, and USB IN 17/18 carries the demo backing track.
+**Not simulated:**
+- Real **USB-audio / Dante streaming** into the console's ports. A browser cannot be a Dante device or a class-compliant USB mixer. The closest working alternatives are the output-device and multichannel mode above, and a multichannel interface as the mic input.
+- Yamaha's exact algorithms and full 18-type effect library. The simulator has 10 families.
+- Channel inserts and a DAW remote.
+- Talkback dimming and an oscillator → individual output routing. The oscillator goes to buses only.
+- Pad switches. The DM3 head amp has none, and its gain starts at -6 dB.
+- Remote/Editor connectivity and user-level security.
 
 ## Known differences from a physical DM3
 
@@ -124,7 +132,10 @@ Two consumers read the same state:
 - The UI is inspired by the DM3's workflow (layers, Sends on Fader, Selected Channel) but is not a replica of its touchscreen.
 - In this simulator, FX buses feed only the internal racks and cannot be patched to outputs.
 - The defaults (channel names, output patch, faders up on the demo channels) form a training scene. They are not Yamaha's initial data.
-- DCA mute also mutes pre-fader sends in the simulator.
+- DCA mute and mute groups also mute pre-fader sends in the simulator.
+- **DCA groups:** published DM3 spec listings disagree about whether the DM3 has DCAs. The simulator provides 8 for practice, so verify on your console and firmware.
+- **Processing order** in the simulator is HPF → EQ → Dynamics 1 → Dynamics 2 → delay.
+- Talkback in the simulator is taken from an input socket.
 
 ## Tests
 

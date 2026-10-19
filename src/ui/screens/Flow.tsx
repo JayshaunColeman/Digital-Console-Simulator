@@ -4,7 +4,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useStore } from '../../state/store';
 import { Key, Section, SignalLed, Select } from '../controls';
-import { buildRoutingGraph, findBreaks, gainToDb, pathGain, type RGraph, type REdge, deviceLabel, effectiveFaderDb, dcaFor } from '../../engine/routing';
+import { buildRoutingGraph, findBreaks, gainToDb, pathGain, type RGraph, type REdge, deviceLabel, effectiveFaderDb, dcaFor, plugProblem } from '../../engine/routing';
 import { fmtDb, fmtHz } from '../../lib/db';
 import { NEG_INF } from '../../model/types';
 import type { Screen } from '../../state/store';
@@ -116,11 +116,13 @@ export function FlowScreen() {
       head.push({ key: 'src', title: `FX rack ${def.fxRack}`, sub: c.fx[def.fxRack! - 1].type, state: 'ok', tap: `fx.${def.fxRack}.out`, go: { screen: 'fx' } });
     } else {
       const loop = plug && plug.device.startsWith('loop:');
+      const prob = port ? plugProblem(c, rig, port) : null;
       head.push({
         key: 'dev',
         title: plug ? deviceLabel(rig, plug.device) : 'No device',
         sub: plug ? (loop ? 'LOOP CABLE' : `cable → ${port?.toUpperCase()}`) : 'nothing plugged into this socket',
-        state: plug ? 'ok' : 'none',
+        state: plug ? (prob ? 'off' : 'ok') : 'none',
+        why: prob ?? undefined,
         tap: plug && !loop ? `dev.${plug.device}` : undefined,
         go: { screen: plug && !loop ? 'sources' : 'io' },
       });
@@ -138,7 +140,9 @@ export function FlowScreen() {
     head.push({ key: 'in', title: `${def.short} ${ch.name}`, sub: `gain ${fmtDb(ch.digitalGain)}${ch.polarity ? ' Ø' : ''}`, state: 'ok', tap: `ch.${sel}.in`, go: { screen: 'channel', selected: sel, focus: 'sec-input' } });
     head.push({ key: 'hpf', title: 'HPF', sub: ch.hpfOn ? fmtHz(ch.hpfFreq) : 'bypassed', state: ch.hpfOn ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-input' } });
     head.push({ key: 'eq', title: 'EQ', sub: ch.eqOn ? ch.eq.filter((b) => b.gain !== 0).length + ' bands active' : 'bypassed', state: ch.eqOn ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-eq' } });
+    head.push({ key: 'gate', title: ch.gate.mode === 'ducker' ? 'DUCKER' : 'GATE', sub: ch.gate.on ? `${ch.gate.threshold} dB, range ${ch.gate.range}${ch.gate.key !== 'self' ? ` key ${ch.gate.key.toUpperCase()}` : ''}` : 'bypassed', state: ch.gate.on ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-gate' } });
     head.push({ key: 'comp', title: 'COMP', sub: ch.comp.on ? `${ch.comp.threshold} dB ${ch.comp.ratio.toFixed(1)}:1` : 'bypassed', state: ch.comp.on ? 'ok' : 'bypass', tap: `ch.${sel}.pre`, go: { screen: 'channel', selected: sel, focus: 'sec-dyn' } });
+    if (ch.delayOn) head.push({ key: 'dly', title: 'DELAY', sub: `${ch.delayMs.toFixed(1)} ms`, state: 'ok', go: { screen: 'channel', selected: sel, focus: 'sec-delay' } });
     const dca = dcaFor(c, sel);
     head.push({ key: 'on', title: 'ON', sub: ch.on ? (dca.muted ? `muted by ${dca.muted}` : 'live') : 'OFF (muted)', state: ch.on && !dca.muted ? 'ok' : 'off', why: !ch.on ? 'Channel ON key is off' : dca.muted ? `Muted by ${dca.muted}` : undefined, go: { screen: 'channel', selected: sel, focus: 'sec-routing' } });
     const fdb = effectiveFaderDb(c, sel);

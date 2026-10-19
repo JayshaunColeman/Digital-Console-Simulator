@@ -3,8 +3,9 @@ import { useStore } from '../../state/store';
 import { Key, Knob, Meter, MeterScale, GrMeter, Section, Select, SignalLed, PeakText } from '../controls';
 import { EqCurve, CompCurve } from '../curves';
 import { fmtDb, fmtHz, fmtPan } from '../../lib/db';
-import { NEG_INF, type CompState, type EqBand } from '../../model/types';
-import { deviceLabel, governingBusId, isLinked } from '../../engine/routing';
+import { NEG_INF, type CompState, type EqBand, type GateState } from '../../model/types';
+import { deviceKind, deviceLabel, governingBusId, isLinked, plugProblem } from '../../engine/routing';
+import { GEQ_FREQS } from '../../model/defaults';
 import { pairKeyOf, pairPartner } from '../../model/dm3';
 import { defaultEq, defaultComp } from '../../model/defaults';
 
@@ -63,7 +64,7 @@ export function EqSection({ bands, eqOn, onToggle, onBand, onReset, hpf }: {
 export function CompSection({ c, onChange, grId, meterTap }: { c: CompState; onChange: (p: Partial<CompState>) => void; grId: string; meterTap: string }) {
   return (
     <Section
-      title="DYNAMICS · COMP"
+      title="DYNAMICS 2 · COMP"
       id="sec-dyn"
       right={
         <Key small on={c.on} kind="on" onClick={() => onChange({ on: !c.on })} topic="comp" testid="comp-on">
@@ -89,7 +90,139 @@ export function CompSection({ c, onChange, grId, meterTap }: { c: CompState; onC
           <Knob label="MAKEUP" value={c.makeup} min={0} max={24} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="comp" testid="comp-makeup" onChange={(v) => onChange({ makeup: v })} />
         </div>
       </div>
-      <p className="note">Gate / ducker (DM3 Dynamics 1) is not simulated.</p>
+    </Section>
+  );
+}
+
+export function GateSection({ g, onChange, grId, keyOptions }: {
+  g: GateState;
+  onChange: (p: Partial<GateState>) => void;
+  grId: string;
+  keyOptions: { value: string; label: string }[];
+}) {
+  return (
+    <Section
+      title="DYNAMICS 1 · GATE / DUCKER"
+      id="sec-gate"
+      right={
+        <div className="row">
+          <Key small on={g.mode === 'gate'} topic="gate" testid="gate-mode-gate" onClick={() => onChange({ mode: 'gate', range: g.mode === 'gate' ? g.range : -60 })}>
+            GATE
+          </Key>
+          <Key small on={g.mode === 'ducker'} topic="ducker" testid="gate-mode-ducker" onClick={() => onChange({ mode: 'ducker', range: g.mode === 'ducker' ? g.range : -12 })}>
+            DUCKER
+          </Key>
+          <Key small on={g.on} kind="on" topic={g.mode} testid="gate-on" onClick={() => onChange({ on: !g.on })}>
+            {g.on ? 'ON' : 'OFF'}
+          </Key>
+        </div>
+      }
+    >
+      <div className="comp-wrap">
+        <div>
+          <GrMeter id={grId} height={110} />
+          <small>{g.mode === 'gate' ? 'ATTEN' : 'DUCK'}</small>
+        </div>
+        <div className="knob-grid">
+          <Knob label="THRESH" value={g.threshold} min={-72} max={0} step={0.5} reset={-40} fmt={(v) => v.toFixed(1)} topic={g.mode} testid="gate-threshold" onChange={(v) => onChange({ threshold: v })} />
+          <Knob label="RANGE" value={g.range} min={-80} max={0} step={1} reset={g.mode === 'gate' ? -60 : -12} fmt={(v) => fmtDb(v, 0)} topic={g.mode} testid="gate-range" onChange={(v) => onChange({ range: v })} />
+          <Knob label="ATTACK" value={g.attack} min={0} max={120} step={0.5} reset={1} fmt={(v) => `${v}ms`} topic={g.mode} onChange={(v) => onChange({ attack: v })} />
+          <Knob label="HOLD" value={g.hold} min={0} max={2000} step={5} reset={50} fmt={(v) => `${Math.round(v)}ms`} topic={g.mode} onChange={(v) => onChange({ hold: v })} />
+          <Knob label="DECAY" value={g.decay} min={5} max={4000} log reset={150} fmt={(v) => `${Math.round(v)}ms`} topic={g.mode} onChange={(v) => onChange({ decay: v })} />
+        </div>
+        <label className="field">
+          <span>KEY IN</span>
+          <Select label="Key in source" testid="gate-key" topic="ducker" value={g.key} options={keyOptions} onChange={(v) => onChange({ key: v })} />
+        </label>
+      </div>
+      <p className="note">
+        {g.mode === 'gate'
+          ? 'GATE: below the threshold the channel is attenuated by RANGE (closes between notes / hits).'
+          : 'DUCKER: when the KEY IN signal exceeds the threshold, this channel is turned down by RANGE (e.g. music under a voice).'}{' '}
+        Order on this simulator: HPF → EQ → DYN 1 → DYN 2 → DELAY.
+      </p>
+    </Section>
+  );
+}
+
+export function GroupKeys({ label, count, value, onToggle, topic, prefix }: {
+  label: string;
+  count: number;
+  value: number[];
+  onToggle: (n: number) => void;
+  topic: string;
+  prefix: string;
+}) {
+  return (
+    <div className="dca-row">
+      <span>{label}</span>
+      {Array.from({ length: count }, (_, i) => (
+        <Key key={i} small on={value.includes(i + 1)} topic={topic} testid={`${prefix}-${i + 1}`} onClick={() => onToggle(i + 1)}>
+          {i + 1}
+        </Key>
+      ))}
+    </div>
+  );
+}
+
+const toggleIn = (arr: number[], n: number) => (arr.includes(n) ? arr.filter((x) => x !== n) : [...arr, n].sort((a, b) => a - b));
+
+export function DelaySection({ on, ms, onToggle, onMs, title }: { on: boolean; ms: number; onToggle: () => void; onMs: (v: number) => void; title: string }) {
+  return (
+    <Section
+      title={title}
+      id="sec-delay"
+      right={
+        <Key small kind="on" on={on} topic="delay" testid="delay-on" onClick={onToggle}>
+          {on ? 'ON' : 'OFF'}
+        </Key>
+      }
+    >
+      <div className="row">
+        <Knob label="TIME" value={ms} min={0} max={1000} step={0.1} reset={0} fmt={(v) => `${v.toFixed(1)}ms`} topic="delay" testid="delay-ms" disabled={!on} onChange={onMs} />
+        <span className="note">
+          ≈ {((ms / 1000) * 343).toFixed(1)} m / {((ms / 1000) * 1125).toFixed(0)} ft of sound travel at 343 m/s.
+        </span>
+      </div>
+    </Section>
+  );
+}
+
+export function GeqSection({ on, gains, onToggle, onBand, onFlat }: { on: boolean; gains: number[]; onToggle: () => void; onBand: (i: number, v: number) => void; onFlat: () => void }) {
+  return (
+    <Section
+      title="GEQ · 31 BAND"
+      id="sec-geq"
+      right={
+        <div className="row">
+          <Key small kind="on" on={on} topic="geq" testid="geq-on" onClick={onToggle}>
+            GEQ {on ? 'ON' : 'OFF'}
+          </Key>
+          <Key small topic="geq" onClick={onFlat}>
+            FLAT
+          </Key>
+        </div>
+      }
+    >
+      <div className={`geq ${on ? '' : 'off'}`}>
+        {GEQ_FREQS.map((f, i) => (
+          <label key={f} className="geq-band" title={`${fmtHz(f)} Hz: ${fmtDb(gains[i] ?? 0)} dB`}>
+            <input
+              type="range"
+              min={-15}
+              max={15}
+              step={0.5}
+              value={gains[i] ?? 0}
+              aria-label={`GEQ ${fmtHz(f)} Hz`}
+              data-testid={`geq-${i}`}
+              onChange={(e) => onBand(i, Number(e.target.value))}
+              onDoubleClick={() => onBand(i, 0)}
+            />
+            <span>{fmtHz(f).replace('.00', '')}</span>
+          </label>
+        ))}
+      </div>
+      <p className="note">1/3-octave peaking filters, ±15 dB. Double-click a slider to zero it. Available on STEREO and MIX 1-6.</p>
     </Section>
   );
 }
@@ -160,16 +293,26 @@ function ChannelView({ id }: { id: string }) {
             ) : (
               <span className="note">Digital port: no head amp. Use DIGITAL GAIN.</span>
             )}
+            {pdef?.hasPreamp ? (
+              <Key small kind="warn" on={ports[port].phantom} topic="phantom" testid={`phantom-${port}`} onClick={() => set((c) => void (c.ports[port].phantom = !ports[port].phantom))}>
+                +48V
+              </Key>
+            ) : null}
             <span className="note">
               Plugged in: <b>{rig.plugs[port] ? deviceLabel(rig, rig.plugs[port]!.device) : 'nothing'}</b>
+              {rig.plugs[port] && !rig.plugs[port]!.device.startsWith('loop:') ? ` (${deviceKind(rig, rig.plugs[port]!.device)})` : ''}
             </span>
           </div>
+        ) : null}
+        {port && plugProblem(consoleState, rig, port) ? <div className="alert bad">{plugProblem(consoleState, rig, port)}.</div> : null}
+        {port && ports[port]?.phantom && rig.plugs[port] && deviceKind(rig, rig.plugs[port]!.device) === 'line' ? (
+          <div className="alert">+48V is on for a line-level device. Phantom power into unbalanced line outputs can damage equipment on a real stage.</div>
         ) : null}
       </div>
     );
   };
 
-  const sendBuses = model.buses.filter((b) => b.kind === 'mix' || b.kind === 'fx');
+  const sendBuses = model.buses.filter((b) => b.kind === 'mix' || b.kind === 'fx' || b.kind === 'matrix');
 
   return (
     <div className="screen channel-screen" data-testid="channel-screen">
@@ -222,7 +365,19 @@ function ChannelView({ id }: { id: string }) {
           onReset={() => upd((c) => (c.eq = defaultEq()))}
         />
 
+        <GateSection
+          g={ch.gate}
+          grId={`ch.${id}.gate`}
+          onChange={(p) => upd((c) => Object.assign(c.gate, p))}
+          keyOptions={[
+            { value: 'self', label: 'SELF' },
+            ...model.channels.filter((k) => k.id !== id && k.kind !== 'fxreturn').map((k) => ({ value: k.id, label: `${k.short} ${consoleState.channels[k.id].name}` })),
+          ]}
+        />
+
         <CompSection c={ch.comp} grId={`ch.${id}.gr`} meterTap={`ch.${id}.pre`} onChange={(p) => upd((c) => Object.assign(c.comp, p))} />
+
+        <DelaySection title="INPUT DELAY" on={ch.delayOn} ms={ch.delayMs} onToggle={() => upd((c) => (c.delayOn = !ch.delayOn))} onMs={(v) => upd((c) => (c.delayMs = v))} />
 
         <Section title="ROUTING · SENDS" id="sec-routing">
           <div className="row">
@@ -255,6 +410,7 @@ function ChannelView({ id }: { id: string }) {
               </Key>
             ))}
           </div>
+          <GroupKeys label="MUTE GRP" prefix="mg-assign" count={consoleState.muteGroups.length} value={ch.muteGroups} topic="mute-group" onToggle={(n) => upd((c) => (c.muteGroups = toggleIn(c.muteGroups, n)))} />
           <table className="sends">
             <thead>
               <tr>
@@ -267,7 +423,7 @@ function ChannelView({ id }: { id: string }) {
             </thead>
             <tbody>
               {sendBuses.map((b) => {
-                const gov = b.kind === 'mix' ? governingBusId(consoleState, b.id) : b.id;
+                const gov = b.kind === 'fx' ? b.id : governingBusId(consoleState, b.id);
                 if (gov !== b.id) return null; // right side of a stereo-linked pair
                 const s = ch.sends[gov];
                 const linked = isLinked(consoleState, b.id);
@@ -281,7 +437,7 @@ function ChannelView({ id }: { id: string }) {
                       </button>
                     </td>
                     <td>
-                      <Key small on={s.on} kind="on" topic={b.kind === 'fx' ? 'fx-send' : 'send-level'} testid={`send-on-${b.id}`} onClick={() => upd((c) => (c.sends[gov].on = !s.on))}>
+                      <Key small on={s.on} kind="on" topic={b.kind === 'fx' ? 'fx-send' : b.kind === 'matrix' ? 'matrix' : 'send-level'} testid={`send-on-${b.id}`} onClick={() => upd((c) => (c.sends[gov].on = !s.on))}>
                         ON
                       </Key>
                     </td>
@@ -390,6 +546,7 @@ function BusView({ id }: { id: string }) {
               </div>
             ) : null}
           </div>
+          <GroupKeys label="MUTE GRP" prefix="bus-mg-assign" count={consoleState.muteGroups.length} value={b.muteGroups} topic="mute-group" onToggle={(n) => upd((x) => (x.muteGroups = toggleIn(x.muteGroups, n)))} />
           <p className="note">
             Feeding this bus:{' '}
             {contributors.length ? contributors.map((c) => consoleState.channels[c.id].name).join(', ') : <b className="bad">no channels</b>}
@@ -465,8 +622,17 @@ function BusView({ id }: { id: string }) {
               })}
           </Section>
         ) : null}
+        {model.geqBuses.includes(id) ? (
+          <GeqSection
+            on={b.geqOn}
+            gains={b.geq}
+            onToggle={() => upd((x) => (x.geqOn = !b.geqOn))}
+            onBand={(i, v) => upd((x) => (x.geq[i] = v))}
+            onFlat={() => upd((x) => (x.geq = x.geq.map(() => 0)))}
+          />
+        ) : null}
         {def.kind !== 'fx' ? (
-          <p className="note">Simulator: the DM3 GEQ insert on output buses is not simulated.</p>
+          <DelaySection title="OUTPUT DELAY" on={b.delayOn} ms={b.delayMs} onToggle={() => upd((x) => (x.delayOn = !b.delayOn))} onMs={(v) => upd((x) => (x.delayMs = v))} />
         ) : null}
         <Key small onClick={() => upd((x) => ((x.eq = defaultEq()), (x.comp = defaultComp())))}>
           RESET BUS PROCESSING

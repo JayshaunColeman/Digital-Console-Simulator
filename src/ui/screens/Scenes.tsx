@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { useStore } from '../../state/store';
+import { useStore, FOCUS_CATS, FOCUS_LABELS } from '../../state/store';
 import { Key, Section, useTopic } from '../controls';
 
 export function ScenesScreen() {
@@ -74,6 +74,25 @@ export function ScenesScreen() {
                   <Key small kind="on" testid={`scene-recall-${i}`} topic="scene" onClick={() => store.recallScene(s.id)}>
                     RECALL
                   </Key>
+                  <details className="focus">
+                    <summary data-testid={`scene-focus-${i}`}>
+                      FOCUS{s.focus && Object.values(s.focus).some((v) => v === false) ? ' *' : ''}
+                    </summary>
+                    {FOCUS_CATS.map((cat) => (
+                      <label key={cat} className="chk">
+                        <input
+                          type="checkbox"
+                          checked={s.focus?.[cat] !== false}
+                          data-testid={`focus-${i}-${cat}`}
+                          onChange={(e) => {
+                            setTopic('focus');
+                            store.setSceneFocus(s.id, cat, e.target.checked);
+                          }}
+                        />
+                        {FOCUS_LABELS[cat]}
+                      </label>
+                    ))}
+                  </details>
                   <Key small onClick={() => download(s, `${s.name}.dm3sim.json`)}>EXPORT</Key>
                   <Key
                     small
@@ -107,6 +126,24 @@ export function ScenesScreen() {
           <Key small onClick={() => fileRef.current?.click()}>
             IMPORT…
           </Key>
+        </div>
+      </Section>
+      <Section title="RECALL SAFE">
+        <p className="note">
+          Items lit here keep their current settings whenever any scene is recalled (all parameter groups). Recall Safe is a console setting and is
+          not stored in scenes.
+        </p>
+        <div className="safe-grid">
+          {model.channels.map((c) => (
+            <Key key={c.id} small kind="warn" on={!!store.safe[c.id]} topic="recall-safe" testid={`safe-${c.id}`} onClick={() => store.setSafe(c.id, !store.safe[c.id])}>
+              {c.short} {store.console.channels[c.id].name}
+            </Key>
+          ))}
+          {model.buses.map((b) => (
+            <Key key={b.id} small kind="warn" on={!!store.safe[b.id]} topic="recall-safe" testid={`safe-${b.id}`} onClick={() => store.setSafe(b.id, !store.safe[b.id])}>
+              {store.console.buses[b.id].name}
+            </Key>
+          ))}
         </div>
       </Section>
       <Section title="CONFIGURATION">

@@ -53,6 +53,7 @@ export async function startAudio(): Promise<void> {
     engine = new AudioEngine(s.model);
     engine.sync(s.console, s.rig);
     await engine.resume();
+    await engine.loadWorklets();
     useStore.subscribe((st, prev) => {
       if (st.console !== prev.console || st.rig !== prev.rig) {
         engine!.sync(st.console, st.rig);
@@ -65,6 +66,8 @@ export async function startAudio(): Promise<void> {
     (window as unknown as { __dm3: unknown }).__dm3 = { engine, store: useStore, runtime: useRuntime };
     await engine.loadStems();
     engine.assignPlayerBuffers(getState().rig);
+    const restored = await engine.restoreFiles(getState().rig);
+    if (restored.length) getState().flash(`Restored ${restored.length} saved audio file(s): ${restored.join(', ')}`);
     useRuntime.setState({ stemsReady: true });
   } catch (e) {
     useRuntime.setState({ error: `Audio engine failed to start: ${(e as Error).message}` });

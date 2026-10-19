@@ -304,6 +304,182 @@ await page.getByTestId('tab-flow').click();
 await page.getByTestId('flow-select').selectOption('ch1');
 check('Signal-flow view renders a verdict', (await page.getByTestId('flow-verdict').innerText()).length > 10);
 
+// ---------------------------------------------------------------- FEATURES
+// Each test uses the steady 1 kHz generator on CH 16 (or a stated source) and
+// reads levels from the live analysers.
+const reset = async () => {
+  await S(() => {
+    const st = window.__dm3.store.getState();
+    st.resetConsole();
+    st.resetRig();
+    window.__dm3.engine.stopAll();
+    st.setRig((r) => void Object.assign(r.generator, { on: true, type: 'sine', freq: 1000, level: -18 }));
+  });
+  await setC(`c.channels.ch16.fader = 0;`);
+  await page.waitForTimeout(300);
+};
+const setR = (code) => S((c) => window.__dm3.store.getState().setRig(new Function('r', c)), code);
+
+test('TEST H: Dynamics 1 gate / ducker');
+await reset();
+await page.getByTestId('sel-ch16').click();
+await page.getByTestId('tab-channel').click();
+const gBase = await peak(page, 'ch.ch16.pre');
+await setC(`Object.assign(c.channels.ch16.gate, { threshold: -10, range: -60, attack: 1, hold: 10, decay: 50 });`);
+await page.getByTestId('gate-on').click();
+await page.waitForTimeout(600);
+const gClosed = await peak(page, 'ch.ch16.pre');
+const gGr = await S(() => window.__dm3.engine.meters.grNow('ch.ch16.gate'));
+check('Gate closed (tone -18 dBFS < threshold -10): attenuated by ~60 dB', gBase - gClosed > 50, `${f(gBase)} -> ${f(gClosed)}`);
+check('Gate attenuation meter shows the reduction', gGr < -40, `${gGr.toFixed(1)} dB`);
+await setC(`c.channels.ch16.gate.threshold = -30;`);
+await page.waitForTimeout(500);
+const gOpen = await peak(page, 'ch.ch16.pre');
+check('Gate open (tone above threshold -30): level restored', Math.abs(gOpen - gBase) < 0.6, f(gOpen));
+// ducker keyed by CH 1 (vocal player)
+await page.getByTestId('gate-mode-ducker').click();
+await setC(`Object.assign(c.channels.ch16.gate, { threshold: -40, range: -12, key: 'ch1', attack: 1, hold: 20, decay: 100 });`);
+await page.waitForTimeout(300);
+const dQuiet = await peak(page, 'ch.ch16.pre');
+check('Ducker: no key signal -> no ducking', Math.abs(dQuiet - gBase) < 0.6, f(dQuiet));
+await page.getByTestId('tab-sources').click();
+await page.getByTestId('play-1').click();
+let dMin = 0;
+for (let i = 0; i < 40; i++) {
+  dMin = Math.min(dMin, await S(() => window.__dm3.engine.meters.grNow('ch.ch16.gate')));
+  await page.waitForTimeout(50);
+}
+check('Ducker: vocal on CH 1 (key in) ducks CH 16 by ~12 dB', dMin < -10 && dMin > -14, `GR ${dMin.toFixed(1)} dB`);
+await page.getByTestId('play-1').click();
+
+test('TEST I: Input / output delay, GEQ, matrix sends');
+await reset();
+// input delay measured with the impulse generator: time between IN and PRE taps
+await setR(`r.generator.type = 'impulse'; r.generator.level = -6;`);
+await setC(`c.channels.ch16.delayOn = true; c.channels.ch16.delayMs = 500;`);
+await page.waitForTimeout(1200);
+const lag = await S(async () => {
+  const m = window.__dm3.engine.meters;
+  let tIn = -1, tPre = -1;
+  const t0 = performance.now();
+  while (performance.now() - t0 < 2500) {
+    const now = performance.now() - t0;
+    if (tIn < 0 && m.peakNow('ch.ch16.in') > -20) tIn = now;
+    if (tIn >= 0 && tPre < 0 && now - tIn > 60 && m.peakNow('ch.ch16.pre') > -20) tPre = now;
+    if (tIn >= 0 && tPre >= 0) break;
+    await new Promise((r) => setTimeout(r, 4));
+  }
+  return tPre - tIn;
+});
+check('Input delay 500 ms: impulse appears ~500 ms later after the delay', Math.abs(lag - 500) < 60, `${lag.toFixed(0)} ms`);
+await setR(`r.generator.type = 'sine'; r.generator.level = -18;`);
+await setC(`c.channels.ch16.delayOn = false; c.channels.ch16.sends.mix1 = { on: true, level: 0, pre: true, pan: 0 };`);
+await page.waitForTimeout(400);
+const qA = await peak(page, 'bus.mix1.out');
+await setC(`c.buses.mix1.geqOn = true; c.buses.mix1.geq[17] = -12;`);
+await page.waitForTimeout(400);
+const qB = await peak(page, 'bus.mix1.out');
+check('GEQ 1 kHz band -12 dB on MIX 1 cuts the 1 kHz tone ~12 dB', Math.abs(qA - qB - 12) < 1.5, `${f(qA)} -> ${f(qB)}`);
+await setC(`c.buses.mix1.geq[5] = -12; c.buses.mix1.geq[17] = 0;`);
+await page.waitForTimeout(400);
+const qC = await peak(page, 'bus.mix1.out');
+check('A distant GEQ band (63 Hz) leaves the 1 kHz tone alone', Math.abs(qA - qC) < 0.6, f(qC));
+await setC(`c.channels.ch16.sends.mtx1 = { on: true, level: 0, pre: false, pan: 0 }; c.outPorts.omni5.source = 'mtx1';`);
+await page.waitForTimeout(400);
+check('Input channel -> MATRIX 1 send reaches the matrix', (await peak(page, 'bus.mtx1.in')) > SIG, f(await peak(page, 'bus.mtx1.in')));
+check('MATRIX 1 patched to OMNI 5 carries it out', (await peak(page, 'out.omni5')) > SIG, f(await peak(page, 'out.omni5')));
+
+test('TEST J: Mute groups, phantom power, device types');
+await reset();
+await setC(`c.channels.ch16.muteGroups = [1];`);
+const mA = await peak(page, 'ch.ch16.post');
+await page.getByTestId('mg-1').click();
+check('Mute group 1 engaged: member CH 16 silent post-fader', (await peak(page, 'ch.ch16.post')) < SIL, `${f(mA)} -> ${f(await peak(page, 'ch.ch16.post'))}`);
+check('...pre-fader still shows the input', (await peak(page, 'ch.ch16.pre')) > SIG);
+await page.getByTestId('mg-1').click();
+check('Mute group released: signal back', (await peak(page, 'ch.ch16.post')) > SIG);
+await setC(`c.buses.mix2.muteGroups = [2]; c.channels.ch16.sends.mix2 = { on: true, level: 0, pre: true, pan: 0 };`);
+await page.getByTestId('mg-2').click();
+check('Mute group on a bus mutes its master', (await peak(page, 'bus.mix2.out')) < SIL && (await peak(page, 'bus.mix2.in')) > SIG);
+await page.getByTestId('mg-2').click();
+// phantom power: generator behaves as a condenser mic on INPUT 16
+await setR(`r.kinds.gen = 'condenser';`);
+check('Condenser device without +48V: INPUT 16 silent', (await peak(page, 'port.in16')) < SIL, f(await peak(page, 'port.in16')));
+await page.getByTestId('tab-io').click();
+check('I/O PATCH flags "NO 48V"', (await page.getByTestId('inrow-in16').innerText()).includes('NO 48V'));
+await page.getByTestId('io-phantom-in16').click();
+const ph = await peak(page, 'port.in16');
+check('+48V on: condenser signal arrives at mic level (~24 dB below line)', Math.abs(ph - (-18 - 24)) < 1, f(ph));
+await setR(`r.kinds.gen = 'dynamic';`);
+const dy = await peak(page, 'port.in16');
+check('Dynamic mic type: ~30 dB below line level', Math.abs(dy - (-18 - 30)) < 1, f(dy));
+
+test('TEST K: Talkback and oscillator');
+await reset();
+await setC(`c.talkback = { on: false, source: 'in16', level: 0, assign: ['mix2'] }; c.osc = { on: false, type: 'pink', freq: 1000, level: -20, assign: ['mix3'] };`);
+check('Talkback off: MIX 2 silent', (await peak(page, 'bus.mix2.in')) < SIL);
+await page.getByTestId('tb-on').click();
+const tbl = await peak(page, 'bus.mix2.in');
+check('Talkback on: source reaches assigned MIX 2 (bypassing the channel)', Math.abs(tbl + 18) < 1, f(tbl));
+check('...and not the unassigned MIX 4', (await peak(page, 'bus.mix4.in')) < SIL);
+await page.getByTestId('tb-on').click();
+await page.getByTestId('osc-on').click();
+const os = await peak(page, 'bus.mix3.in', 800);
+check('Oscillator pink noise reaches assigned MIX 3', os > -40 && os < -10, f(os));
+await page.getByTestId('osc-on').click();
+check('Oscillator off: MIX 3 silent', (await peak(page, 'bus.mix3.in')) < SIL);
+
+test('TEST L: Scene Focus and Recall Safe');
+await reset();
+await setC(`c.channels.ch16.fader = -5; c.channels.ch1.fader = -5; c.outPorts.omni3.source = 'mix3';`);
+await page.getByTestId('tab-scenes').click();
+await page.getByTestId('scene-name').fill('Focus test');
+await page.getByTestId('scene-store').click();
+const idx = (await S(() => window.__dm3.store.getState().scenes.length)) - 1;
+await setC(`c.channels.ch16.fader = -30; c.channels.ch1.fader = -30; c.outPorts.omni3.source = null;`);
+await page.getByTestId(`scene-focus-${idx}`).click();
+await page.getByTestId(`focus-${idx}-outpatch`).uncheck();
+await page.getByTestId('safe-ch1').click();
+await page.getByTestId(`scene-recall-${idx}`).click();
+let cs = await st(page);
+check('Recall with Focus (output patch excluded): faders recalled', cs.channels.ch16.fader === -5);
+check('...output patch left as it was (OMNI 3 still unpatched)', cs.outPorts.omni3.source === null);
+check('Recall Safe CH 1 kept its current fader (-30)', cs.channels.ch1.fader === -30);
+await page.getByTestId('safe-ch1').click();
+
+test('TEST M: Effect library');
+await reset();
+await setC(`c.channels.ch16.sends.fx1 = { on: true, level: 0, pre: false, pan: 0 };`);
+const types = ['reverb-hall', 'reverb-room', 'reverb-plate', 'early-ref', 'delay-stereo', 'delay-mono', 'chorus', 'flanger', 'phaser', 'tremolo'];
+const fxRes = [];
+for (const t of types) {
+  await setC(`c.fx[0].type = '${t}';`);
+  await page.waitForTimeout(500);
+  const v = await peak(page, 'fx.1.out', 700);
+  fxRes.push(`${t} ${v.toFixed(0)}`);
+  check(`FX type ${t}: produces output, no overload`, v > -60 && v < 0, f(v));
+}
+
+test('TEST N: Saved-state migration from the previous version');
+await page.waitForTimeout(700); // let the debounced autosave flush first
+await page.evaluate(() => {
+  const s = JSON.parse(localStorage.getItem('dm3sim.console.v1'));
+  s.version = 1;
+  for (const ch of Object.values(s.channels)) {
+    delete ch.gate; delete ch.delayOn; delete ch.delayMs; delete ch.muteGroups; delete ch.sends.mtx1; delete ch.sends.mtx2;
+    ch.fader = -7.5;
+  }
+  delete s.muteGroups; delete s.talkback; delete s.osc;
+  for (const p of Object.values(s.ports)) delete p.phantom;
+  localStorage.setItem('dm3sim.console.v1', JSON.stringify(s));
+});
+await page.reload();
+await page.getByTestId('power').click();
+await page.waitForFunction(() => !!window.__dm3, null, { timeout: 20000 });
+cs = await st(page);
+check('Old (v1) autosave loads: settings kept', cs.channels.ch2.fader === -7.5);
+check('...and new parameters are filled with defaults', cs.version === 2 && cs.channels.ch2.gate && cs.muteGroups.length === 6 && cs.channels.ch2.sends.mtx1 && cs.ports.in1.phantom === false);
+
 check('No page errors during the run', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();

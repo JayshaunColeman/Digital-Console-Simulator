@@ -1,16 +1,16 @@
 # Acceptance test results
 
-Run: 2026-10-19T21:42:05.227Z · headless Chromium · levels read from live AnalyserNodes
+Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live AnalyserNodes
 
 ## ✅ TEST A: Main mix
 
-- PASS — Input 1 (port) shows signal (-12.4 dB)
+- PASS — Input 1 (port) shows signal (-12.3 dB)
 - PASS — Channel 1 input meter shows signal (-8.7 dB)
 - PASS — ST assign off -> STEREO bus silent (-140.0 dB)
 - PASS — ST assign on -> STEREO master meter responds (-24.7 dB)
-- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-32.1 dB)
-- PASS — Audio reaches the browser output (-32.0 dB)
-- PASS — Muted: channel PRE meter still shows input (-13.0 dB)
+- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-32.9 dB)
+- PASS — Audio reaches the browser output (-34.1 dB)
+- PASS — Muted: channel PRE meter still shows input (-12.6 dB)
 - PASS — Muted: POST-fader meter silent (-140.0 dB)
 - PASS — Muted: STEREO bus silent (-140.0 dB)
 - PASS — Muted: OMNI 7 and browser output silent
@@ -61,7 +61,7 @@ Run: 2026-10-19T21:42:05.227Z · headless Chromium · levels read from live Anal
 - PASS — Output level reduced accordingly (-18.0 dB -> -26.7 dB)
 - PASS — GR meter element present on the screen
 - PASS — MAKEUP +6 dB raises output by 6 dB (-26.7 dB -> -20.7 dB)
-- PASS — Compressor GR responds to the vocal programme (max GR -11.5 dB)
+- PASS — Compressor GR responds to the vocal programme (max GR -11.7 dB)
 
 ## ✅ TEST F: Independent mixes
 
@@ -86,4 +86,63 @@ Run: 2026-10-19T21:42:05.227Z · headless Chromium · levels read from live Anal
 - PASS — Hint system reveals a hint
 - PASS — Reveal path shows the path analysis
 - PASS — Signal-flow view renders a verdict
+
+## ✅ TEST H: Dynamics 1 gate / ducker
+
+- PASS — Gate closed (tone -18 dBFS < threshold -10): attenuated by ~60 dB (-18.0 dB -> -78.0 dB)
+- PASS — Gate attenuation meter shows the reduction (-60.0 dB)
+- PASS — Gate open (tone above threshold -30): level restored (-18.0 dB)
+- PASS — Ducker: no key signal -> no ducking (-18.0 dB)
+- PASS — Ducker: vocal on CH 1 (key in) ducks CH 16 by ~12 dB (GR -12.0 dB)
+
+## ✅ TEST I: Input / output delay, GEQ, matrix sends
+
+- PASS — Input delay 500 ms: impulse appears ~500 ms later after the delay (504 ms)
+- PASS — GEQ 1 kHz band -12 dB on MIX 1 cuts the 1 kHz tone ~12 dB (-18.0 dB -> -30.0 dB)
+- PASS — A distant GEQ band (63 Hz) leaves the 1 kHz tone alone (-18.0 dB)
+- PASS — Input channel -> MATRIX 1 send reaches the matrix (-21.0 dB)
+- PASS — MATRIX 1 patched to OMNI 5 carries it out (-21.0 dB)
+
+## ✅ TEST J: Mute groups, phantom power, device types
+
+- PASS — Mute group 1 engaged: member CH 16 silent post-fader (-18.0 dB -> -140.0 dB)
+- PASS — ...pre-fader still shows the input
+- PASS — Mute group released: signal back
+- PASS — Mute group on a bus mutes its master
+- PASS — Condenser device without +48V: INPUT 16 silent (-140.0 dB)
+- PASS — I/O PATCH flags "NO 48V"
+- PASS — +48V on: condenser signal arrives at mic level (~24 dB below line) (-42.0 dB)
+- PASS — Dynamic mic type: ~30 dB below line level (-48.0 dB)
+
+## ✅ TEST K: Talkback and oscillator
+
+- PASS — Talkback off: MIX 2 silent
+- PASS — Talkback on: source reaches assigned MIX 2 (bypassing the channel) (-18.0 dB)
+- PASS — ...and not the unassigned MIX 4
+- PASS — Oscillator pink noise reaches assigned MIX 3 (-20.9 dB)
+- PASS — Oscillator off: MIX 3 silent
+
+## ✅ TEST L: Scene Focus and Recall Safe
+
+- PASS — Recall with Focus (output patch excluded): faders recalled
+- PASS — ...output patch left as it was (OMNI 3 still unpatched)
+- PASS — Recall Safe CH 1 kept its current fader (-30)
+
+## ✅ TEST M: Effect library
+
+- PASS — FX type reverb-hall: produces output, no overload (-18.2 dB)
+- PASS — FX type reverb-room: produces output, no overload (-19.2 dB)
+- PASS — FX type reverb-plate: produces output, no overload (-17.8 dB)
+- PASS — FX type early-ref: produces output, no overload (-8.8 dB)
+- PASS — FX type delay-stereo: produces output, no overload (-17.9 dB)
+- PASS — FX type delay-mono: produces output, no overload (-17.9 dB)
+- PASS — FX type chorus: produces output, no overload (-16.0 dB)
+- PASS — FX type flanger: produces output, no overload (-17.9 dB)
+- PASS — FX type phaser: produces output, no overload (-17.9 dB)
+- PASS — FX type tremolo: produces output, no overload (-18.0 dB)
+
+## ✅ TEST N: Saved-state migration from the previous version
+
+- PASS — Old (v1) autosave loads: settings kept
+- PASS — ...and new parameters are filled with defaults
 - PASS — No page errors during the run

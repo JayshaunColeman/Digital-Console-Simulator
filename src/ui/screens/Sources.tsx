@@ -1,6 +1,7 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { DeviceKind } from '../../model/types';
 import { useStore } from '../../state/store';
-import { useRuntime, connectMic, playerAction, playAll, stopAll, loadPlayerFile, startAudio } from '../../state/engine';
+import { useRuntime, connectMic, playerAction, playAll, stopAll, loadPlayerFile, startAudio, getEngine } from '../../state/engine';
 import { Key, Knob, Meter, Section, Select } from '../controls';
 import { fmtDb, fmtHz } from '../../lib/db';
 import type { GeneratorState } from '../../model/types';
@@ -56,6 +57,7 @@ export function SourcesScreen() {
               <th>Source</th>
               <th>Transport</th>
               <th>Loop</th>
+              <th>Device type</th>
               <th>Level</th>
               <th>Output</th>
               <th>Cabled to</th>
@@ -131,6 +133,9 @@ export function SourcesScreen() {
                     </Key>
                   </td>
                   <td>
+                    <KindSelect dev={`p${i + 1}`} />
+                  </td>
+                  <td>
                     <Knob size={24} label="" value={p.level} min={-40} max={6} step={0.5} reset={0} fmt={(v) => fmtDb(v)} onChange={(v) => setRig((x) => void (x.players[i].level = v))} />
                   </td>
                   <td>
@@ -146,6 +151,7 @@ export function SourcesScreen() {
         </table>
       </Section>
 
+      <OutputDevice />
       <div className="screen-grid">
         <Section title="MICROPHONE">
           <p className="note">
@@ -158,6 +164,7 @@ export function SourcesScreen() {
               {rt.mic.status === 'on' ? 'MIC CONNECTED' : rt.mic.status === 'requesting' ? 'REQUESTING…' : 'CONNECT MIC'}
             </Key>
             <Meter tap="dev.mic" height={14} width={140} label="Microphone level (before head amp)" />
+            <KindSelect dev="mic" noLine />
             <Knob label="MIC LEVEL" value={rig.micLevel} min={-40} max={0} step={1} reset={-20} fmt={(v) => fmtDb(v, 0)} onChange={(v) => setRig((r) => void (r.micLevel = v))} />
           </div>
           {rt.mic.label ? <p className="note">Device: {rt.mic.label}</p> : null}
@@ -191,5 +198,81 @@ export function SourcesScreen() {
         </Section>
       </div>
     </div>
+  );
+}
+
+function KindSelect({ dev, noLine }: { dev: string; noLine?: boolean }) {
+  const kind = useStore((s) => s.rig.kinds?.[dev] ?? 'line');
+  const setRig = useStore((s) => s.setRig);
+  return (
+    <Select
+      label={`${dev} device type`}
+      testid={`kind-${dev}`}
+      topic="device-kind"
+      value={kind}
+      onChange={(v) => setRig((r) => void ((r.kinds ??= {})[dev] = v as DeviceKind))}
+      options={[
+        ...(noLine ? [] : [{ value: 'line', label: 'Line level' }]),
+        { value: 'dynamic', label: 'Dynamic mic' },
+        { value: 'condenser', label: 'Condenser mic (+48V)' },
+      ]}
+    />
+  );
+}
+
+function OutputDevice() {
+  const out = useStore((s) => s.rig.output);
+  const setRig = useStore((s) => s.setRig);
+  const running = useRuntime((r) => r.running);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [maxCh, setMaxCh] = useState(2);
+  const canSink = typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
+  useEffect(() => {
+    if (!running) return;
+    setMaxCh(getEngine()?.ctx.destination.maxChannelCount ?? 2);
+    navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((d) => setDevices(d.filter((x) => x.kind === 'audiooutput')))
+      .catch(() => setDevices([]));
+  }, [running, out.sinkId]);
+  return (
+    <Section title="AUDIO OUTPUT DEVICE">
+      <div className="row">
+        <label className="field">
+          <span>Device</span>
+          <Select
+            label="Audio output device"
+            topic="output-device"
+            value={out.sinkId}
+            onChange={(v) => setRig((r) => void (r.output.sinkId = v))}
+            options={[
+              { value: '', label: 'System default' },
+              ...devices.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => ({ value: d.deviceId, label: d.label || `Output ${i + 1}` })),
+            ]}
+          />
+        </label>
+        <Key small on={out.mode === 'stereo'} topic="output-device" onClick={() => setRig((r) => void (r.output.mode = 'stereo'))}>
+          STEREO (LISTEN)
+        </Key>
+        <Key
+          small
+          on={out.mode === 'multi'}
+          topic="output-device"
+          disabled={maxCh <= 2}
+          testid="out-multi"
+          onClick={() => setRig((r) => void (r.output.mode = 'multi'))}
+        >
+          MULTICHANNEL: OMNI 1-{Math.min(8, maxCh)} → OUTS 1-{Math.min(8, maxCh)}
+        </Key>
+      </div>
+      <p className="note">
+        {canSink ? '' : 'This browser cannot choose an output device (Chrome/Edge can); the system default is used. '}
+        Current device offers {maxCh} output channel(s).{' '}
+        {maxCh > 2
+          ? 'Multichannel mode sends each OMNI OUT socket to the matching interface output (hard ceiling at -0.9 dBFS, no limiter) so you can drive real wedges/speakers.'
+          : 'Multichannel mode needs an interface with more than 2 outputs (and device labels appear after microphone permission is granted).'}
+        {' '}Real USB-audio or Dante streaming to the console ports is not possible from a browser.
+      </p>
+    </Section>
   );
 }
