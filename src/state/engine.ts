@@ -48,6 +48,10 @@ export async function startAudio(): Promise<void> {
     return;
   }
   useRuntime.setState({ starting: true, error: '' });
+  // iOS Safari mutes Web Audio when the silent switch is on unless the audio
+  // session is declared as playback (Safari 16.4+)
+  const nav = navigator as Navigator & { audioSession?: { type: string } };
+  if (nav.audioSession) nav.audioSession.type = 'playback';
   try {
     const s = getState();
     engine = new AudioEngine(s.model);
@@ -61,6 +65,10 @@ export async function startAudio(): Promise<void> {
       }
     });
     engine.ctx.onstatechange = () => useRuntime.setState({ running: engine!.ctx.state === 'running' });
+    // phones suspend / interrupt audio when the tab is backgrounded or a call comes in
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && engine && engine.ctx.state !== 'running') void engine.resume().catch(() => undefined);
+    });
     setInterval(snapshot, 250);
     useRuntime.setState({ running: engine.ctx.state === 'running', sampleRate: engine.ctx.sampleRate });
     (window as unknown as { __dm3: unknown }).__dm3 = { engine, store: useStore, runtime: useRuntime };

@@ -1,0 +1,16 @@
+{
+  "name": "DM3 Console Simulator",
+  "short_name": "DM3 Sim",
+  "description": "Training simulator modeled on the Yamaha DM3 digital mixer: routing, monitor mixes, patching and troubleshooting with real audio.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#121418",
+  "theme_color": "#0c0d10",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

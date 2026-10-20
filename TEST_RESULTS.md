@@ -1,16 +1,16 @@
 # Acceptance test results
 
-Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live AnalyserNodes
+Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live AnalyserNodes
 
 ## ✅ TEST A: Main mix
 
-- PASS — Input 1 (port) shows signal (-12.3 dB)
-- PASS — Channel 1 input meter shows signal (-8.7 dB)
+- PASS — Input 1 (port) shows signal (-6.0 dB)
+- PASS — Channel 1 input meter shows signal (-13.2 dB)
 - PASS — ST assign off -> STEREO bus silent (-140.0 dB)
-- PASS — ST assign on -> STEREO master meter responds (-24.7 dB)
-- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-32.9 dB)
-- PASS — Audio reaches the browser output (-34.1 dB)
-- PASS — Muted: channel PRE meter still shows input (-12.6 dB)
+- PASS — ST assign on -> STEREO master meter responds (-25.1 dB)
+- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-31.9 dB)
+- PASS — Audio reaches the browser output (-32.0 dB)
+- PASS — Muted: channel PRE meter still shows input (-7.4 dB)
 - PASS — Muted: POST-fader meter silent (-140.0 dB)
 - PASS — Muted: STEREO bus silent (-140.0 dB)
 - PASS — Muted: OMNI 7 and browser output silent
@@ -61,7 +61,7 @@ Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live Anal
 - PASS — Output level reduced accordingly (-18.0 dB -> -26.7 dB)
 - PASS — GR meter element present on the screen
 - PASS — MAKEUP +6 dB raises output by 6 dB (-26.7 dB -> -20.7 dB)
-- PASS — Compressor GR responds to the vocal programme (max GR -11.7 dB)
+- PASS — Compressor GR responds to the vocal programme (max GR -8.2 dB)
 
 ## ✅ TEST F: Independent mixes
 
@@ -75,7 +75,7 @@ Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live Anal
 
 - PASS — Settings changed after storing
 - PASS — Recall restores the exact stored configuration
-- PASS — Restored routing carries audio again (OMNI 1 has the vocal) (-20.2 dB)
+- PASS — Restored routing carries audio again (OMNI 1 has the vocal) (-15.3 dB)
 - PASS — Scene persisted in local storage across reload
 
 ## ✅ EXTRA: Loop detection, troubleshooting scenario, signal flow
@@ -97,7 +97,7 @@ Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live Anal
 
 ## ✅ TEST I: Input / output delay, GEQ, matrix sends
 
-- PASS — Input delay 500 ms: impulse appears ~500 ms later after the delay (504 ms)
+- PASS — Input delay 500 ms: impulse appears ~500 ms later after the delay (495 ms)
 - PASS — GEQ 1 kHz band -12 dB on MIX 1 cuts the 1 kHz tone ~12 dB (-18.0 dB -> -30.0 dB)
 - PASS — A distant GEQ band (63 Hz) leaves the 1 kHz tone alone (-18.0 dB)
 - PASS — Input channel -> MATRIX 1 send reaches the matrix (-21.0 dB)
@@ -119,7 +119,7 @@ Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live Anal
 - PASS — Talkback off: MIX 2 silent
 - PASS — Talkback on: source reaches assigned MIX 2 (bypassing the channel) (-18.0 dB)
 - PASS — ...and not the unassigned MIX 4
-- PASS — Oscillator pink noise reaches assigned MIX 3 (-20.9 dB)
+- PASS — Oscillator pink noise reaches assigned MIX 3 (-20.7 dB)
 - PASS — Oscillator off: MIX 3 silent
 
 ## ✅ TEST L: Scene Focus and Recall Safe
@@ -131,9 +131,9 @@ Run: 2026-10-19T22:47:47.183Z · headless Chromium · levels read from live Anal
 ## ✅ TEST M: Effect library
 
 - PASS — FX type reverb-hall: produces output, no overload (-18.2 dB)
-- PASS — FX type reverb-room: produces output, no overload (-19.2 dB)
-- PASS — FX type reverb-plate: produces output, no overload (-17.8 dB)
-- PASS — FX type early-ref: produces output, no overload (-8.8 dB)
+- PASS — FX type reverb-room: produces output, no overload (-16.6 dB)
+- PASS — FX type reverb-plate: produces output, no overload (-18.3 dB)
+- PASS — FX type early-ref: produces output, no overload (-17.7 dB)
 - PASS — FX type delay-stereo: produces output, no overload (-17.9 dB)
 - PASS — FX type delay-mono: produces output, no overload (-17.9 dB)
 - PASS — FX type chorus: produces output, no overload (-16.0 dB)

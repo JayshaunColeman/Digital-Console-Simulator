@@ -1,10 +1,11 @@
 import { useStore, type Layer } from '../state/store';
-import { Fader, Key, Knob, Meter, GrMeter } from './controls';
+import { Fader, Key, Knob, Meter, GrMeter, useStripSize } from './controls';
 import { fmtDb, fmtPan } from '../lib/db';
 import { governingBusId, isLinked } from '../engine/routing';
 import { pairPartner } from '../model/dm3';
 
 export function ChannelStrip({ id }: { id: string }) {
+  const size = useStripSize();
   const ch = useStore((s) => s.console.channels[id]);
   const def = useStore((s) => s.model.channels.find((c) => c.id === id)!);
   const sofRaw = useStore((s) => s.ui.sof);
@@ -19,14 +20,14 @@ export function ChannelStrip({ id }: { id: string }) {
   const faderVal = send ? send.level : ch.fader;
   const patch = def.kind === 'fxreturn' ? `FX${def.fxRack}` : ch.patchL ? ch.patchL.toUpperCase() : '—';
   return (
-    <div className={`strip ${selected ? 'selected' : ''} ${send ? 'sof' : ''}`} data-testid={`strip-${id}`}>
+    <div className={`strip ${selected ? 'selected' : ''} ${send ? 'sof' : ''} ${size.compact ? 'compact' : ''}`} data-testid={`strip-${id}`}>
       <div className="strip-patch" title="Input patch">
         {patch}
       </div>
       <button
         className="strip-name"
         style={{ borderColor: ch.color }}
-        onClick={() => setUi((u) => void ((u.selected = id), (u.screen = 'channel')))}
+        onClick={() => setUi((u) => void ((u.selected = id), ((u.screen = 'channel'), (u.pane = 'screen'))))}
         title="Open channel processing"
       >
         <span className="strip-num">{def.short}</span>
@@ -48,10 +49,15 @@ export function ChannelStrip({ id }: { id: string }) {
           >
             {send.pre ? 'PRE' : 'POST'}
           </Key>
+        ) : size.compact ? (
+          <Key small on={ch.cue} kind="cue" onClick={() => set((c) => void (c.channels[id].cue = !ch.cue))} topic="cue" testid={`cue-${id}`}>
+            CUE
+          </Key>
         ) : (
           <GrMeter id={`ch.${id}.gr`} horizontal />
         )}
       </div>
+      {size.compact ? null : (
       <Knob
         size={26}
         label={send && sofLinked ? 'SEND PAN' : 'PAN'}
@@ -69,17 +75,20 @@ export function ChannelStrip({ id }: { id: string }) {
           })
         }
       />
-      <Key on={ch.cue} kind="cue" onClick={() => set((c) => void (c.channels[id].cue = !ch.cue))} topic="cue" testid={`cue-${id}`}>
-        CUE
-      </Key>
+      )}
+      {size.compact && !send ? null : (
+        <Key on={ch.cue} kind="cue" onClick={() => set((c) => void (c.channels[id].cue = !ch.cue))} topic="cue" testid={size.compact ? undefined : `cue-${id}`}>
+          CUE
+        </Key>
+      )}
       <div className="strip-fader">
         <div className="strip-meters">
-          <Meter tap={`ch.${id}.pre`} height={150} label="PRE-fader meter (before ON/fader)" testid={`meter-${id}-pre`} />
-          <Meter tap={`ch.${id}.post`} height={150} label="POST-fader meter" testid={`meter-${id}-post`} />
+          <Meter tap={`ch.${id}.pre`} height={size.meter} label="PRE-fader meter (before ON/fader)" testid={`meter-${id}-pre`} />
+          <Meter tap={`ch.${id}.post`} height={size.meter} label="POST-fader meter" testid={`meter-${id}-post`} />
         </div>
         <Fader
           value={faderVal}
-          height={170}
+          height={size.fader}
           color={ch.color}
           accent={send ? '#e3b23c' : undefined}
           topic={send ? 'send-level' : 'channel-fader'}
@@ -100,21 +109,18 @@ export function ChannelStrip({ id }: { id: string }) {
       <Key on={ch.on} kind="on" onClick={() => set((c) => void (c.channels[id].on = !ch.on))} topic="on-key" testid={`on-${id}`} title="ON (lit = live, dark = muted)">
         ON
       </Key>
-      <Key
-        on={selected}
-        kind="sel"
-        onClick={() => setUi((u) => void (u.selected = id))}
-        testid={`sel-${id}`}
-        title="Select channel"
-      >
-        SEL
-      </Key>
+      {size.compact ? null : (
+        <Key on={selected} kind="sel" onClick={() => setUi((u) => void (u.selected = id))} testid={`sel-${id}`} title="Select channel">
+          SEL
+        </Key>
+      )}
       {sofRaw && !send ? <div className="strip-na">no send</div> : null}
     </div>
   );
 }
 
 export function BusStrip({ id }: { id: string }) {
+  const size = useStripSize();
   const bus = useStore((s) => s.console.buses[governingBusId(s.console, id)]);
   const own = useStore((s) => s.console.buses[id]);
   const linked = useStore((s) => isLinked(s.console, id));
@@ -124,12 +130,12 @@ export function BusStrip({ id }: { id: string }) {
   const gov = useStore((s) => governingBusId(s.console, id));
   const pp = pairPartner(id);
   return (
-    <div className={`strip bus ${selected ? 'selected' : ''}`} data-testid={`strip-${id}`}>
+    <div className={`strip bus ${selected ? 'selected' : ''} ${size.compact ? 'compact' : ''}`} data-testid={`strip-${id}`}>
       <div className="strip-patch">{linked && pp ? `${pp.left.toUpperCase()}/${pp.right.slice(-1)} ST` : 'BUS'}</div>
       <button
         className="strip-name"
         style={{ borderColor: bus.color }}
-        onClick={() => setUi((u) => void ((u.selected = gov), (u.screen = 'channel')))}
+        onClick={() => setUi((u) => void ((u.selected = gov), ((u.screen = 'channel'), (u.pane = 'screen'))))}
       >
         <span className="strip-num">{id.toUpperCase()}</span>
         <span>{own.name}</span>
@@ -142,12 +148,12 @@ export function BusStrip({ id }: { id: string }) {
       </Key>
       <div className="strip-fader">
         <div className="strip-meters">
-          <Meter tap={`bus.${id}.in`} height={150} label="Bus input (sum of sends)" />
-          <Meter tap={`bus.${id}.out`} height={150} label="Bus output (after master)" testid={`meter-${id}-out`} />
+          <Meter tap={`bus.${id}.in`} height={size.meter} label="Bus input (sum of sends)" />
+          <Meter tap={`bus.${id}.out`} height={size.meter} label="Bus output (after master)" testid={`meter-${id}-out`} />
         </div>
         <Fader
           value={bus.fader}
-          height={170}
+          height={size.fader}
           color={bus.color}
           topic="bus-master"
           testid={`fader-${id}`}

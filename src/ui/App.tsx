@@ -1,19 +1,22 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { useStore, type Screen } from '../state/store';
 import { useRuntime, startAudio } from '../state/engine';
 import { StripBank } from './Strips';
 import { MasterSection } from './Master';
-import { Key } from './controls';
+import { Key, useViewport } from './controls';
 import { TOPICS } from './topics';
 import { OverviewScreen } from './screens/Overview';
 import { ChannelScreen } from './screens/ChannelScreen';
-import { RoutingScreen } from './screens/Routing';
-import { IOScreen } from './screens/IO';
-import { FxScreen } from './screens/FxScreen';
 import { SourcesScreen } from './screens/Sources';
-import { ScenesScreen } from './screens/Scenes';
-import { FlowScreen } from './screens/Flow';
-import { TrainingScreen, AcademyScreen } from './screens/Training';
+
+// less-used screens load on demand to keep the first load small on phones
+const RoutingScreen = lazy(() => import('./screens/Routing').then((m) => ({ default: m.RoutingScreen })));
+const IOScreen = lazy(() => import('./screens/IO').then((m) => ({ default: m.IOScreen })));
+const FxScreen = lazy(() => import('./screens/FxScreen').then((m) => ({ default: m.FxScreen })));
+const ScenesScreen = lazy(() => import('./screens/Scenes').then((m) => ({ default: m.ScenesScreen })));
+const FlowScreen = lazy(() => import('./screens/Flow').then((m) => ({ default: m.FlowScreen })));
+const TrainingScreen = lazy(() => import('./screens/Training').then((m) => ({ default: m.TrainingScreen })));
+const AcademyScreen = lazy(() => import('./screens/Training').then((m) => ({ default: m.AcademyScreen })));
 import { buildRoutingGraph, findLoops } from '../engine/routing';
 
 const SCREENS: { id: Screen; label: string }[] = [
@@ -127,29 +130,51 @@ export default function App() {
       body = <AcademyScreen />;
       break;
   }
+  const vp = useViewport();
+  const pane = useStore((s) => s.ui.pane);
+  const show = (p: 'mix' | 'screen' | 'master') => !vp.mobile || pane === p;
   return (
-    <div className="app">
+    <div className={`app ${vp.mobile ? 'mobile' : ''}`}>
       <TopBar />
       {!rt.running && !rt.starting ? (
         <div className="power-banner">
-          Audio engine is off. Browsers only start audio after a click: press <b>POWER</b>, then open <b>SOURCES</b> and press <b>PLAY ALL</b>.
+          Audio engine is off. Browsers only start audio after a tap: press <b>POWER</b>, then open <b>SOURCES</b> and press <b>PLAY ALL</b>.
         </div>
       ) : null}
-      <div className="workspace">
-        <div className="center">
-          <nav className="tabs" aria-label="Screens">
-            {SCREENS.map((s) => (
-              <button key={s.id} className={`tab ${screen === s.id ? 'active' : ''}`} onClick={() => setUi((u) => void (u.screen = s.id))} data-testid={`tab-${s.id}`}>
-                {s.label}
-              </button>
-            ))}
-          </nav>
-          <div className="display">{body}</div>
-          <Coach />
-        </div>
-        <MasterSection />
-        <StripBank />
+      <div className={`workspace ${vp.mobile ? `mobile pane-${pane}` : ''}`}>
+        {show('screen') ? (
+          <div className="center">
+            <nav className="tabs" aria-label="Screens">
+              {SCREENS.map((s) => (
+                <button key={s.id} className={`tab ${screen === s.id ? 'active' : ''}`} onClick={() => setUi((u) => void (u.screen = s.id))} data-testid={`tab-${s.id}`}>
+                  {s.label}
+                </button>
+              ))}
+            </nav>
+            <div className="display">
+              <Suspense fallback={<p className="note">Loading…</p>}>{body}</Suspense>
+            </div>
+            <Coach />
+          </div>
+        ) : null}
+        {show('master') ? <MasterSection /> : null}
+        {show('mix') ? <StripBank /> : null}
       </div>
+      {vp.mobile ? (
+        <nav className="mobile-nav" aria-label="Console sections">
+          {(
+            [
+              ['mix', 'FADERS'],
+              ['screen', 'SCREENS'],
+              ['master', 'MASTER'],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} className={pane === id ? 'active' : ''} data-testid={`pane-${id}`} onClick={() => setUi((u) => void (u.pane = id))}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
     </div>
   );
 }

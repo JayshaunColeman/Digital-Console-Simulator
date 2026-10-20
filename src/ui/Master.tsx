@@ -110,7 +110,7 @@ export function MasterSection() {
             CUE
           </Key>
         </div>
-        <Key kind="sel" on={false} onClick={() => setUi((u) => void ((u.selected = 'st'), (u.screen = 'channel')))}>
+        <Key kind="sel" on={false} onClick={() => setUi((u) => void ((u.selected = 'st'), ((u.screen = 'channel'), (u.pane = 'screen'))))}>
           SEL ST
         </Key>
       </div>

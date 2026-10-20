@@ -11,7 +11,7 @@ import { MeterHub } from './meters';
 import { devicePick, Generator, Microphone, Player, type DeviceOut } from './devices';
 import { FxRack } from './fx';
 import { anyCue, dcaFor, effectiveFaderDb, governingBusId, muteGroupFor, deviceKind } from './routing';
-import { Dyn1Node, loadDyn1 } from './dyn1';
+import { DynNode, loadDynamics } from './dynamics';
 import { getFile, putFile } from '../lib/idb';
 import { GEQ_FREQS } from '../model/defaults';
 import { renderDemoStems, DEMO_STEMS, type StemId } from '../audio/demoStems';
@@ -44,7 +44,7 @@ interface ChNodes extends Strip {
   input: GainNode;
   digital: GainNode;
   hpf: BiquadFilterNode;
-  gate: Dyn1Node | null; // lazily created
+  gate: DynNode | null; // lazily created
   pre: GainNode;
   on: GainNode;
   fader: GainNode;
@@ -622,7 +622,7 @@ export class AudioEngine {
     if (ch.hpfOn) stages.push(['hpf', n.hpf, n.hpf]);
     if (ch.eqOn) n.eq.forEach((f, i) => stages.push([`eq${i}`, f, f]));
     if (ch.gate.on && this.workletReady) {
-      if (!n.gate) n.gate = new Dyn1Node(this.ctx, nch);
+      if (!n.gate) n.gate = new DynNode(this.ctx, nch, 'dm3-dyn1');
       const g = ch.gate;
       this.set(n.gate.param('threshold'), clamp(g.threshold, -72, 0));
       this.set(n.gate.param('range'), clamp(g.range, -80, 0));
@@ -817,7 +817,7 @@ export class AudioEngine {
   /** Load the gate/ducker worklet; until then Dynamics 1 is treated as bypassed. */
   async loadWorklets(): Promise<void> {
     try {
-      await loadDyn1(this.ctx);
+      await loadDynamics(this.ctx);
       this.workletReady = true;
       if (this.lastState && this.lastRig) this.sync(this.lastState, this.lastRig);
     } catch {

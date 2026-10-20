@@ -18,7 +18,9 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--text); font: 13px/1.35 var(--font); }
+body { background: var(--bg); color: var(--text); font: 13px/1.35 var(--font); overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+button, .key, .tab { touch-action: manipulation; }
+.strip, .key, .tab, .fader, .knob { -webkit-user-select: none; user-select: none; }
 button, select, input { font: inherit; color: inherit; }
 small { color: var(--dim); }
 b { font-weight: 650; }
@@ -313,3 +315,56 @@ details.focus[open] { background: #15171c; padding: 4px; border-radius: 4px; dis
 .geq-band span { font-size: 7.5px; color: var(--dim); font-family: var(--mono); writing-mode: vertical-lr; transform: rotate(180deg); height: 28px; text-align: right; }
 #sec-geq { grid-column: 1 / -1; }
 .geq { align-items: start; }
+
+/* ---------- touch devices ---------- */
+@media (pointer: coarse) {
+  .key { min-height: 32px; min-width: 32px; font-size: 12px; }
+  .key.small { min-height: 28px; font-size: 11px; padding: 3px 7px; }
+  .tab { padding: 9px 12px; }
+  .sel { min-height: 32px; font-size: 14px; }
+  input[type='range'] { height: 28px; }
+  .fader-track { width: 34px; }
+  .fader-cap { width: 34px; height: 40px; }
+  .fader-slot { left: 15px; }
+}
+
+/* ---------- phone layout: one pane at a time + bottom navigation ---------- */
+.app.mobile { height: 100vh; height: 100dvh; min-height: 0; }
+.app.mobile .topbar { padding: 4px 8px; padding-top: max(4px, env(safe-area-inset-top)); gap: 6px; }
+.app.mobile .brand small, .app.mobile .sr { display: none; }
+.app.mobile .status { order: 9; flex-basis: 100%; min-height: 0; font-size: 11px; }
+.app.mobile .status:empty { display: none; }
+.app.mobile .power-banner { font-size: 12px; padding: 4px 8px; }
+.workspace.mobile { display: flex; flex-direction: column; padding: 6px; padding-bottom: calc(60px + env(safe-area-inset-bottom)); flex: 1; min-height: 0; overflow: hidden; }
+.workspace.mobile > * { flex: 1; min-height: 0; overflow: auto; }
+.workspace.mobile .center { display: flex; flex-direction: column; }
+.workspace.mobile .tabs { flex-wrap: nowrap; overflow-x: auto; flex: none; scrollbar-width: none; }
+.workspace.mobile .tabs .tab { flex: none; }
+.workspace.mobile .display { flex: 1; min-height: 0; max-height: none; padding: 6px; }
+.workspace.mobile .coach { flex: none; max-height: 30vh; overflow: auto; font-size: 12px; }
+.workspace.mobile .master { display: flex; flex-direction: column; overflow-y: auto; }
+.workspace.mobile .master-block { flex: none; }
+.workspace.mobile .bank { display: flex; flex-direction: column; border: none; padding: 0; background: none; }
+.workspace.mobile .bank-layers { flex-wrap: nowrap; overflow-x: auto; flex: none; }
+.workspace.mobile .bank-layers .tab { flex: none; }
+.workspace.mobile .bank-strips { flex: 1; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; }
+.workspace.mobile .strip { scroll-snap-align: start; flex-basis: 84px; }
+.workspace.mobile .screen-grid { grid-template-columns: 1fr; }
+.mobile-nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: #0c0d10; border-top: 1px solid var(--edge); padding-bottom: env(safe-area-inset-bottom); z-index: 20; }
+.mobile-nav button { flex: 1; background: none; border: none; color: var(--dim); padding: 14px 0; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+.mobile-nav button.active { color: #fff; box-shadow: inset 0 3px 0 var(--accent); }
+
+.strip > * { flex-shrink: 0; }
+.strip.compact { gap: 3px; padding: 2px; }
+.strip.compact .strip-patch, .strip.compact .gr { display: none; }
+.strip.compact .strip-name { padding: 1px 2px; flex-direction: row; gap: 3px; justify-content: center; }
+.strip.compact .strip-meters { padding-top: 6px; }
+.strip.compact .fader { padding: 6px 0; }
+@media (max-height: 520px) {
+  .app.mobile .topbar { padding: 2px 8px; }
+  .app.mobile .topbar .key { min-height: 26px; padding: 2px 8px; }
+  .app.mobile .brand { font-size: 14px; }
+  .mobile-nav button { padding: 8px 0; }
+  .workspace.mobile { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+  .workspace.mobile .bank-layers .tab { padding: 5px 10px; }
+}

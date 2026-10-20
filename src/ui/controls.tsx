@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, type ReactNode } from 'react';
+import { useEffect, useRef, useCallback, useState, type ReactNode } from 'react';
 import { FADER_MARKS, clamp, faderDbToPos, faderPosToDb, fmtDb } from '../lib/db';
 import { NEG_INF } from '../model/types';
 import { getEngine, useRuntime } from '../state/engine';
@@ -397,4 +397,40 @@ export function Select({
       ))}
     </select>
   );
+}
+
+// ------------------------------------------------------------- viewport ----
+
+function measure() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // phones (portrait) and phones in landscape get the single-pane mobile layout
+  return { w, h, mobile: w < 760 || (h < 500 && w < 1000) };
+}
+
+export function useViewport() {
+  const [vp, setVp] = useState(measure);
+  useEffect(() => {
+    const on = () => setVp(measure());
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', on);
+    };
+  }, []);
+  return vp;
+}
+
+/** Fader / meter heights for the channel strips (taller on phones to use the screen). */
+export function useStripSize() {
+  const vp = useViewport();
+  if (!vp.mobile) return { fader: 170, meter: 150, compact: false };
+  // phone in landscape: drop pan / patch / SEL rows so the fader still has travel
+  if (vp.h < 520) {
+    const fader = Math.max(80, Math.min(260, vp.h - 250));
+    return { fader, meter: fader - 20, compact: true };
+  }
+  const fader = Math.max(130, Math.min(360, vp.h - 400));
+  return { fader, meter: fader - 20, compact: false };
 }

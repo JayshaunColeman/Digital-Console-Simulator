@@ -101,6 +101,7 @@ export interface UiState {
   learning: boolean;
   topic: string | null; // last interacted control kind (coach panel)
   focus: string | null; // section to scroll to on the channel screen
+  pane: 'mix' | 'screen' | 'master'; // which part is visible on phones
 }
 
 interface Store {
@@ -170,7 +171,7 @@ export const useStore = create<Store>()(
     model: initialModel,
     console: validState(initialModel, storedState) ? storedState : defaultConsoleState(initialModel),
     rig: storedRig ?? defaultRig(),
-    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null },
+    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null, pane: 'mix' },
     scenes: storedScenes,
     safe: load<Record<string, boolean>>(LS_SAFE) ?? {},
     status: '',
