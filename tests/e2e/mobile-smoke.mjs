@@ -1,5 +1,5 @@
 import { chromium, devices } from 'playwright';
-const out = process.argv[2];
+const out = process.argv[2] ?? (await import('node:os')).tmpdir();
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 const ctx = await browser.newContext({ ...devices['iPhone 13'] });
 const page = await ctx.newPage();

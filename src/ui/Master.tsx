@@ -1,4 +1,7 @@
+import { useEffect } from 'react';
 import { useStore } from '../state/store';
+import { getEngine, useRuntime } from '../state/engine';
+import { IN_LABEL, OUT_LABEL } from './Strips';
 import { Fader, Key, Meter, MeterScale, GrMeter, Knob, Select } from './controls';
 import { fmtDb, fmtHz } from '../lib/db';
 import { anyCue, governingBusId, isLinked } from '../engine/routing';
@@ -142,6 +145,8 @@ export function MasterSection() {
         </div>
       </div>
 
+      <MeterSetup />
+
       <TalkbackOsc />
 
       <div className="master-block">
@@ -229,6 +234,8 @@ function TalkbackOsc() {
   const toggle = (arr: string[], b: string) => (arr.includes(b) ? arr.filter((x) => x !== b) : [...arr, b]);
   return (
     <div className="master-block">
+      {model.features.talkback ? (
+      <>
       <div className="block-title">TALKBACK</div>
       <div className="strip-row wrap">
         <Key kind="cue" on={tb.on} topic="talkback" testid="tb-on" onClick={() => set((c) => void (c.talkback.on = !tb.on))}>
@@ -255,6 +262,8 @@ function TalkbackOsc() {
         ))}
       </div>
 
+      </>
+      ) : null}
       <div className="block-title">OSCILLATOR</div>
       <div className="strip-row wrap">
         <Key kind="warn" on={osc.on} topic="osc" testid="osc-on" onClick={() => set((c) => void (c.osc.on = !osc.on))}>
@@ -285,6 +294,38 @@ function TalkbackOsc() {
           </Key>
         ))}
       </div>
+    </div>
+  );
+}
+
+function MeterSetup() {
+  const ui = useStore((s) => s.ui);
+  const setUi = useStore((s) => s.setUi);
+  const running = useRuntime((r) => r.running);
+  useEffect(() => {
+    const e = getEngine();
+    if (e) e.meters.holdEnabled = ui.peakHold;
+  }, [ui.peakHold, running]);
+  return (
+    <div className="master-block">
+      <div className="block-title">METER</div>
+      <div className="meter-points">
+        <span>INPUT</span>
+        {(['prehpf', 'prefader', 'poston'] as const).map((p) => (
+          <Key key={p} small on={ui.meterIn === p} topic="meters" testid={`mp-in-${p}`} onClick={() => setUi((u) => void (u.meterIn = p))}>
+            {IN_LABEL[p]}
+          </Key>
+        ))}
+        <span>OUTPUT</span>
+        {(['preeq', 'prefader', 'poston'] as const).map((p) => (
+          <Key key={p} small on={ui.meterOut === p} topic="meters" testid={`mp-out-${p}`} onClick={() => setUi((u) => void (u.meterOut = p))}>
+            {OUT_LABEL[p]}
+          </Key>
+        ))}
+      </div>
+      <Key small kind="accent" on={ui.peakHold} topic="meters" testid="peak-hold" onClick={() => setUi((u) => void (u.peakHold = !u.peakHold))}>
+        PEAK HOLD
+      </Key>
     </div>
   );
 }

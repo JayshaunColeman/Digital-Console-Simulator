@@ -414,22 +414,17 @@ await setR(`r.kinds.gen = 'dynamic';`);
 const dy = await peak(page, 'port.in16');
 check('Dynamic mic type: ~30 dB below line level', Math.abs(dy - (-18 - 30)) < 1, f(dy));
 
-test('TEST K: Talkback and oscillator');
+test('TEST K: Oscillator (DM3 has no dedicated talkback)');
 await reset();
-await setC(`c.talkback = { on: false, source: 'in16', level: 0, assign: ['mix2'] }; c.osc = { on: false, type: 'pink', freq: 1000, level: -20, assign: ['mix3'] };`);
-check('Talkback off: MIX 2 silent', (await peak(page, 'bus.mix2.in')) < SIL);
-await page.getByTestId('tb-on').click();
-const tbl = await peak(page, 'bus.mix2.in');
-check('Talkback on: source reaches assigned MIX 2 (bypassing the channel)', Math.abs(tbl + 18) < 1, f(tbl));
-check('...and not the unassigned MIX 4', (await peak(page, 'bus.mix4.in')) < SIL);
-await page.getByTestId('tb-on').click();
+await setC(`c.osc = { on: false, type: 'pink', freq: 1000, level: -20, assign: ['mix3'] };`);
+check('No talkback control on the DM3 model', (await page.getByTestId('tb-on').count()) === 0);
 await page.getByTestId('osc-on').click();
 const os = await peak(page, 'bus.mix3.in', 800);
 check('Oscillator pink noise reaches assigned MIX 3', os > -40 && os < -10, f(os));
 await page.getByTestId('osc-on').click();
 check('Oscillator off: MIX 3 silent', (await peak(page, 'bus.mix3.in')) < SIL);
 
-test('TEST L: Scene Focus and Recall Safe');
+test('TEST L: Recall Safe and scene memory');
 await reset();
 await setC(`c.channels.ch16.fader = -5; c.channels.ch1.fader = -5; c.outPorts.omni3.source = 'mix3';`);
 await page.getByTestId('tab-scenes').click();
@@ -437,15 +432,70 @@ await page.getByTestId('scene-name').fill('Focus test');
 await page.getByTestId('scene-store').click();
 const idx = (await S(() => window.__dm3.store.getState().scenes.length)) - 1;
 await setC(`c.channels.ch16.fader = -30; c.channels.ch1.fader = -30; c.outPorts.omni3.source = null;`);
-await page.getByTestId(`scene-focus-${idx}`).click();
-await page.getByTestId(`focus-${idx}-outpatch`).uncheck();
+check('No scene Focus control on the DM3 model', (await page.getByTestId(`scene-focus-${idx}`).count()) === 0);
 await page.getByTestId('safe-ch1').click();
 await page.getByTestId(`scene-recall-${idx}`).click();
 let cs = await st(page);
-check('Recall with Focus (output patch excluded): faders recalled', cs.channels.ch16.fader === -5);
-check('...output patch left as it was (OMNI 3 still unpatched)', cs.outPorts.omni3.source === null);
+check('Recall restores the other channels and the patch', cs.channels.ch16.fader === -5 && cs.outPorts.omni3.source === 'mix3');
 check('Recall Safe CH 1 kept its current fader (-30)', cs.channels.ch1.fader === -30);
 await page.getByTestId('safe-ch1').click();
+
+test('TEST O: Processing matched to DM3 documentation');
+await reset();
+await page.getByTestId('sel-ch16').click();
+await page.getByTestId('tab-channel').click();
+// HIGH band LPF
+await setR(`r.generator.freq = 8000;`);
+await page.waitForTimeout(300);
+const lpA = await peak(page, 'ch.ch16.pre');
+await setC(`Object.assign(c.channels.ch16.eq[3], { type: 'lowpass', freq: 1000, q: 0.7 });`);
+await page.waitForTimeout(400);
+const lpB = await peak(page, 'ch.ch16.pre');
+check('HIGH band LPF @1 kHz attenuates an 8 kHz tone (> 24 dB)', lpA - lpB > 24, `${f(lpA)} -> ${f(lpB)}`);
+await setC(`c.channels.ch16.eq[3] = { type: 'highshelf', freq: 8000, gain: 0, q: 0.7 };`);
+await setR(`r.generator.freq = 1000;`);
+// pre-EQ vs pre-fader send point (BUS SETUP)
+await setC(`Object.assign(c.channels.ch16.eq[1], { freq: 1000, gain: 12, q: 2 }); c.channels.ch16.sends.mix1 = { on: true, level: 0, pre: true, pan: 0 };`);
+await page.waitForTimeout(400);
+const ppF = await peak(page, 'bus.mix1.in');
+await setC(`c.buses.mix1.prePoint = 'eq';`);
+await page.waitForTimeout(400);
+const ppE = await peak(page, 'bus.mix1.in');
+check('PRE FADER send point includes the +12 dB EQ boost', Math.abs(ppF - (-18 + 12)) < 1, f(ppF));
+check('PRE EQ send point bypasses the EQ (back to -18 dBFS)', Math.abs(ppE + 18) < 1, f(ppE));
+await setC(`c.channels.ch16.on = false;`);
+check('PRE EQ sends still follow the channel ON key', (await peak(page, 'bus.mix1.in')) < SIL);
+await setC(`c.channels.ch16.on = true; c.buses.mix1.prePoint = 'fader'; c.channels.ch16.eq[1].gain = -12;`);
+// compressor key-in: post EQ (sees -30 dBFS) vs pre EQ (sees -18 dBFS)
+await setC(`Object.assign(c.channels.ch16.comp, { on: true, threshold: -24, ratio: 4, knee: 0, attack: 5, release: 100, makeup: 0, key: 'post', oneKnob: false });`);
+await page.waitForTimeout(700);
+const kPost = await S(() => window.__dm3.engine.meters.grNow('ch.ch16.gr'));
+await page.getByTestId('comp-key').click();
+await page.waitForTimeout(700);
+const kPre = await S(() => window.__dm3.engine.meters.grNow('ch.ch16.gr'));
+check('Comp key POST EQ: tone cut to -30 dBFS stays under -24 threshold (no GR)', kPost > -0.3, `GR ${kPost.toFixed(1)}`);
+check('Comp key PRE EQ: detector sees -18 dBFS -> 4.5 dB GR', Math.abs(kPre + 4.5) < 0.5, `GR ${kPre.toFixed(1)}`);
+// 1-knob mode
+await setC(`c.channels.ch16.eq[1].gain = 0; Object.assign(c.channels.ch16.comp, { key: 'post', oneKnob: true, amount: 8 });`);
+await page.waitForTimeout(800);
+const ok1 = await S(() => window.__dm3.engine.meters.grNow('ch.ch16.gr'));
+check('1-KNOB amount 8 compresses the -18 dBFS tone', ok1 < -2, `GR ${ok1.toFixed(1)}`);
+await setC(`c.channels.ch16.comp.on = false; c.channels.ch16.digitalGain = 40;`);
+check('Digital gain is limited to +24 dB', Math.abs((await peak(page, 'ch.ch16.in')) - (-18 + 24)) < 1, f(await peak(page, 'ch.ch16.in')));
+await setC(`c.channels.ch16.digitalGain = 0;`);
+// meter point selection
+await page.getByTestId('pane-mix').count();
+await page.getByTestId('mp-in-poston').click();
+check('Strip meter switched to POST ON', (await page.getByTestId('meter-ch16').getAttribute('data-tap')) === 'ch.ch16.post');
+await page.getByTestId('mp-in-prehpf').click();
+check('Strip meter switched to PRE HPF', (await page.getByTestId('meter-ch16').getAttribute('data-tap')) === 'ch.ch16.in');
+await page.getByTestId('mp-in-prefader').click();
+check('ST IN has no HPF / Dynamics 1 controls', await (async () => {
+  await page.evaluate(() => window.__dm3.store.getState().setUi((u) => { u.selected = 'stin'; u.screen = 'channel'; }));
+  await page.waitForTimeout(200);
+  return (await page.getByTestId('hpf-on').count()) === 0 && (await page.getByTestId('gate-on').count()) === 0;
+})());
+check('No DCA groups on the DM3 model', (await S(() => window.__dm3.store.getState().console.dcas.length)) === 0);
 
 test('TEST M: Effect library');
 await reset();

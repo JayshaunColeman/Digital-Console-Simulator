@@ -10,6 +10,7 @@
 
 import type { ConsoleState, RigState } from '../model/types';
 import { NEG_INF } from '../model/types';
+import { defaultComp, defaultGate } from '../model/defaults';
 import { findLoops } from '../engine/routing';
 import type { CheckCtx, CheckResult, Scenario } from './types';
 
@@ -306,15 +307,7 @@ export const SCENARIOS: Scenario[] = [
       'The vocal is thin and lifeless and sits far too low in the mix. Pushing the fader up barely helps and just makes it sound squashed and pumpy.',
     setup: (s: ConsoleState) => {
       intendedShow(s);
-      s.channels.ch1.comp = {
-        on: true,
-        threshold: -50,
-        ratio: 20,
-        attack: 10,
-        release: 150,
-        knee: 2,
-        makeup: 0,
-      };
+      s.channels.ch1.comp = { ...defaultComp(), on: true, threshold: -50, ratio: 20, attack: 10, release: 150, knee: 2, makeup: 0 };
     },
     hints: [
       'Routing and faders look right; something is eating the level dynamically.',
@@ -398,24 +391,24 @@ export const SCENARIOS: Scenario[] = [
 
   // l1 -------------------------------------------------------------------------
   {
-    id: 'multi-dca-and-patch',
+    id: 'multi-mutegroup-and-patch',
     title: 'Vocal vanished everywhere',
     difficulty: 3,
     brief:
       'The singer has vanished from the PA, and the wedge she is standing at is playing the keyboard mix instead of her own. The soundcheck was fine an hour ago.',
     setup: (s: ConsoleState) => {
       intendedShow(s);
-      s.dcas[0] = { name: 'Vox', level: 0, on: false };
-      s.channels.ch1.dca = [1];
+      s.muteGroups[2] = { name: 'VOX', on: true };
+      s.channels.ch1.muteGroups = [3];
       s.outPorts.omni1.source = 'mix2';
     },
     hints: [
       'There is more than one fault. Check the PA path and the wedge path separately.',
-      'For the PA: something other than the channel strip itself can mute a channel (look at the DCA groups). For the wedge: check the OUTPUT PATCH.',
-      'DCA 1 ("Vox") is muted and contains channel 1, and OMNI OUT 1 is patched to MIX 2. Switch DCA 1 back on (or take the vocal out of it) and patch MIX 1 to OMNI OUT 1.',
+      'For the PA: something other than the channel strip itself can mute a channel (look at the MUTE GROUPS in the MASTER section). For the wedge: check the OUTPUT PATCH.',
+      'MUTE GROUP 3 ("VOX") is engaged and contains channel 1, and OMNI OUT 1 is patched to MIX 2. Disengage MUTE GROUP 3 (or take the vocal out of it) and patch MIX 1 to OMNI OUT 1.',
     ],
     solution:
-      'Two faults: (1) the vocal channel belongs to DCA 1, and that DCA was muted - a muted DCA silences the channel including its sends, so the vocal vanished from both FOH and the wedge; (2) OMNI OUT 1 was patched to MIX 2 (keys wedge) instead of MIX 1. Unmute the DCA (or remove ch1 from it) and patch MIX 1 to OMNI OUT 1. Concept: DCA groups sit above the channel strip, so an innocent-looking strip can still be muted from elsewhere; always check group assignments when a channel is silent everywhere.',
+      'Two faults: (1) the vocal channel belongs to mute group 3 ("VOX"), and that group was engaged - an engaged mute group silences its member channels including their sends, so the vocal vanished from both FOH and the wedge even though the channel ON key and fader look fine; (2) OMNI OUT 1 was patched to MIX 2 (keys wedge) instead of MIX 1. Disengage the mute group (or remove ch1 from it) and patch MIX 1 to OMNI OUT 1. Concept: mute groups act on the channel from the MASTER section, so an innocent-looking strip can still be silenced from elsewhere; always check the mute groups when a channel is silent everywhere, then check the output patch separately.',
     trace: { from: 'ch:ch1', to: 'out:omni1' },
     check: (ctx) =>
       result([
@@ -513,7 +506,7 @@ export const SCENARIOS: Scenario[] = [
       'Mute group 1 is engaged and both the vocal and the keys are assigned to it (SELECTED CH > MUTE GROUP). Disengage MUTE GROUP 1 in the MASTER section, or take the two channels out of the group.',
     ],
     solution:
-      'Mute group 1 had been used to mute the vocal and the keys during the speeches, and it was left engaged afterwards. A mute group silences all of its member channels (including their sends) while it is on, regardless of each channel\'s own ON key. Switch MUTE GROUP 1 off in the MASTER section (or remove the channels from the group). Concept: mute groups are like DCA mutes - they hide in the MASTER section, so check them whenever several unrelated channels are silent together. Do not fix it by muting something else.',
+      'Mute group 1 had been used to mute the vocal and the keys during the speeches, and it was left engaged afterwards. A mute group silences all of its member channels (including their sends) while it is on, regardless of each channel\'s own ON key. Switch MUTE GROUP 1 off in the MASTER section (or remove the channels from the group). Concept: mute groups act on many channels at once from the MASTER section, so check them whenever several unrelated channels are silent together. Do not fix it by muting something else.',
     trace: { from: 'ch:ch1', to: 'out:omni7' },
     check: (ctx) =>
       result([
@@ -589,7 +582,7 @@ export const SCENARIOS: Scenario[] = [
       'The OSCILLATOR is on, set to pink noise, and assigned to MIX 1-4 (the wedge buses). Switch it off, or take the wedge buses out of its assignment.',
     ],
     solution:
-      'The console oscillator (pink noise at -20 dBFS) had been left on after ringing out the wedges and was still assigned to MIX 1-4. The oscillator injects its signal directly into the assigned buses, bypassing every channel, so muting channels does nothing. Switch the oscillator off (or unassign the buses). Do not mute the wedge buses - the mixes still need to carry the band. Concept: test signals (oscillator, generator) and talkback live outside the channel strips; check them whenever noise appears in a bus with all channels quiet.',
+      'The console oscillator (pink noise at -20 dBFS) had been left on after ringing out the wedges and was still assigned to MIX 1-4. The oscillator injects its signal directly into the assigned buses, bypassing every channel, so muting channels does nothing. Switch the oscillator off (or unassign the buses). Do not mute the wedge buses - the mixes still need to carry the band. Concept: test signals (the oscillator, the signal generator) live outside the channel strips; check them whenever noise appears in a bus with all channels quiet.',
     trace: { from: 'osc', to: 'out:omni1' },
     check: (ctx) => {
       const o = ctx.state.osc;
@@ -612,32 +605,35 @@ export const SCENARIOS: Scenario[] = [
 
   // q --------------------------------------------------------------------------
   {
-    id: 'talkback-latched',
+    id: 'talkback-channel-left-on',
     title: 'Engineer chatter in the wedges',
     difficulty: 1,
     brief:
-      'The band can hear the sound engineer talking and clearing his throat in all four wedges, and he swears he is not pressing anything. It carries on during the songs.',
+      'The band can hear the sound engineer talking and clearing his throat in all four wedges, and he swears he is not pressing anything. It carries on during the songs, even though nothing is audible out front.',
     setup: (s: ConsoleState) => {
       intendedShow(s);
-      s.talkback = { on: true, source: 'in8', level: 0, assign: ['mix1', 'mix2', 'mix3', 'mix4'] };
+      // the DM3 has no dedicated talkback: the engineer's mic is channel 8 on INPUT 8,
+      // sent pre-fader to the wedge mixes (fader parked at -inf so FOH never hears it)
+      s.channels.ch8.on = true;
+      for (const bus of ['mix1', 'mix2', 'mix3', 'mix4']) setSend(s, 'ch8', bus, 0);
     },
     hints: [
-      'The voice is coming from the engineer\'s own microphone, which is not a normal input channel in any mix.',
-      'The console has a dedicated way to speak into monitor mixes. Look in the MASTER section.',
-      'TALKBACK is switched on (latched) and assigned to MIX 1-4. Switch the TB key off, or clear the mix assignments.',
+      'The voice is coming from the engineer\'s own microphone. The DM3 has no dedicated talkback key, so that mic is just another channel somewhere on the console.',
+      'Find the channel named "Mic" (the browser microphone on INPUT 8). Its fader is down and nothing is heard out front, yet it still reaches the wedges. How can a channel feed a mix with its fader at the bottom?',
+      'Channel 8 is ON and sends PRE-fader to MIX 1-4, so the fader position does not matter. Switch channel 8 ON off (the right habit between talks), or switch its MIX 1-4 sends off. Do not mute the wedge buses.',
     ],
     solution:
-      'Talkback was latched on, with the engineer\'s mic on INPUT 8 assigned to MIX 1-4, so everything he said went into every wedge. Switch the TB key off (it should be momentary or used only when talking), or clear the MIX 1-4 assignments if talkback is not wanted there. Concept: talkback is a direct injection into the assigned buses, independent of channels, faders and sends.',
-    trace: { from: 'tb', to: 'out:omni1' },
+      'The engineer\'s talkback mic is an ordinary channel on the DM3: channel 8 "Mic" on INPUT 8, sent pre-fader to MIX 1-4. Its ON key had been left on, so everything he said went into every wedge; pre-fader sends ignore the fader, which is why the parked fader and a clean PA hid the problem. Switch channel 8 ON off (turn it on only while talking), or switch its MIX 1-4 sends off. Do not mute the wedge buses (the band would lose their mixes) and do not unplug the mic (you still need it to talk). Concept: on a console without a talkback section, talkback is a channel with pre-fader sends to the monitor buses, and an open channel is an open mic.',
+    trace: { from: 'ch:ch8', to: 'out:omni1' },
     check: (ctx) => {
-      const t = ctx.state.talkback;
-      const wedges = ['mix1', 'mix2', 'mix3', 'mix4'];
-      const clear = !t.on || wedges.every((b) => !t.assign.includes(b));
-      const quiet = [1, 2, 3, 4].every((n) => ctx.gain('tb', `out:omni${n}`) < -40);
+      const quiet = [1, 2, 3, 4].every((n) => ctx.gain('ch:ch8', `out:omni${n}`) < -40);
+      const mic = ctx.rig.plugs.in8?.device === 'mic' && ctx.state.channels.ch8.patchL === 'in8';
       return result([
-        ['Wedges free of the engineer\'s voice', clear && quiet],
+        ['Wedges free of the engineer\'s voice', quiet],
+        ['Engineer\'s mic still available on channel 8', mic],
         ['Vocal still reaching Wedge 1 (OMNI OUT 1)', reaches(ctx.gain('ch:ch1', 'out:omni1'))],
         ['Keys still reaching Wedge 2 (OMNI OUT 2)', reaches(ctx.gain('ch:ch6', 'out:omni2'))],
+        ['Drums and bass still reaching Wedges 3 and 4', reaches(ctx.gain('ch:ch2', 'out:omni3')) && reaches(ctx.gain('ch:ch5', 'out:omni4'))],
         ...live(ctx, 'Live signal at OMNI OUT 1', (c) => c.peak('out.omni1') > -60),
       ]);
     },
@@ -646,13 +642,14 @@ export const SCENARIOS: Scenario[] = [
   // r --------------------------------------------------------------------------
   {
     id: 'ducker-wrong-key',
-    title: 'Backing track pumps with the kick',
+    title: 'Keys pump with the kick',
     difficulty: 3,
     brief:
-      'The band wants the backing track to tuck down a little under the singer. Instead it dips in time with the kick drum, every beat, and hardly moves at all when she sings.',
+      'The band wants the keyboard to tuck down a little under the singer. Instead it dips in time with the kick drum, every beat, and hardly moves at all when she sings.',
     setup: (s: ConsoleState) => {
       intendedShow(s);
-      s.channels.stin.gate = {
+      s.channels.ch6.gate = {
+        ...defaultGate(),
         on: true,
         mode: 'ducker',
         threshold: -30,
@@ -664,22 +661,22 @@ export const SCENARIOS: Scenario[] = [
       };
     },
     hints: [
-      'The backing track is being turned down automatically by something - but by the wrong thing.',
-      'Open SELECTED CH for the backing track (ST IN) and look at DYNAMICS 1. Every ducker listens to a signal called the key.',
-      'The ducker on ST IN has its KEY set to channel 2 (the kick). Set the key source to channel 1 (the vocal), or switch the ducker off.',
+      'The keys are being turned down automatically by something - but by the wrong thing.',
+      'Open SELECTED CH for the keys (channel 6) and look at DYNAMICS 1. Every ducker listens to a signal called the key.',
+      'The ducker on channel 6 has its KEY set to channel 2 (the kick). Set the key source to channel 1 (the vocal), or switch the ducker off.',
     ],
     solution:
-      'The backing track had a ducker in Dynamics 1, but its key input was channel 2 (Kick) instead of channel 1 (Vocal). A ducker lowers its own channel whenever the key signal exceeds the threshold, so the backing dipped on every kick. Set the key to channel 1 so the backing only tucks under the singer (or switch the ducker off). Keep the mode as DUCKER with a moderate range (around -6 to -15 dB) - a gate here would do the opposite. Concept: side-chain dynamics are controlled by the key, not by the channel\'s own signal.',
-    trace: { from: 'ch:ch2', to: 'ch:stin' },
+      'The keys channel had a ducker in Dynamics 1, but its key input was channel 2 (Kick) instead of channel 1 (Vocal). A ducker lowers its own channel whenever the key signal exceeds the threshold, so the keys dipped on every kick. Set the key to channel 1 so the keys only tuck under the singer (or switch the ducker off). Keep the mode as DUCKER with a moderate range (around -6 to -15 dB) - a gate here would do the opposite, and a key of SELF would just duck the keys by their own level. Concept: side-chain dynamics are controlled by the key, not by the channel\'s own signal; on the DM3 Dynamics 1 exists on CH 1-16 only, so a ducker goes on a mono channel.',
+    trace: { from: 'ch:ch2', to: 'ch:ch6' },
     check: (ctx) => {
-      const g = ctx.state.channels.stin.gate;
+      const g = ctx.state.channels.ch6.gate;
       const ok = !g.on || (g.mode === 'ducker' && g.key === 'ch1' && g.range >= -30 && g.range <= -3);
       return result([
-        ['Backing track follows the singer, not the drums', ok],
-        ['Backing track still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:stin', 'out:omni7'))],
+        ['Keys follow the singer, not the drums', ok],
+        ['Keys still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch6', 'out:omni7'))],
         ['Vocal still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch1', 'out:omni7'))],
         ['Kick still reaching the PA (OMNI OUT 7)', reaches(ctx.gain('ch:ch2', 'out:omni7'))],
-        ...live(ctx, 'Live backing signal in the PA', (c) => c.peak('ch.stin.in') > -60),
+        ...live(ctx, 'Live keys signal in the PA', (c) => c.peak('ch.ch6.in') > -60),
       ]);
     },
   },

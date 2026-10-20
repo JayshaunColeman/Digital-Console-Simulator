@@ -102,6 +102,9 @@ export interface UiState {
   topic: string | null; // last interacted control kind (coach panel)
   focus: string | null; // section to scroll to on the channel screen
   pane: 'mix' | 'screen' | 'master'; // which part is visible on phones
+  meterIn: 'prehpf' | 'prefader' | 'poston'; // input-channel meter point (METER screen)
+  meterOut: 'preeq' | 'prefader' | 'poston'; // output-bus meter point
+  peakHold: boolean;
 }
 
 interface Store {
@@ -171,7 +174,7 @@ export const useStore = create<Store>()(
     model: initialModel,
     console: validState(initialModel, storedState) ? storedState : defaultConsoleState(initialModel),
     rig: storedRig ?? defaultRig(),
-    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null, pane: 'mix' },
+    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null, pane: 'mix', meterIn: 'prefader', meterOut: 'poston', peakHold: true },
     scenes: storedScenes,
     safe: load<Record<string, boolean>>(LS_SAFE) ?? {},
     status: '',
@@ -195,6 +198,10 @@ export const useStore = create<Store>()(
     },
     storeScene: (name) =>
       set((s) => {
+        if (s.scenes.length >= s.model.maxScenes) {
+          s.status = `Scene memory is full (${s.model.maxScenes} scenes). Delete a scene first.`;
+          return;
+        }
         const sc: Scene = {
           id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
           name: name.trim() || `Scene ${s.scenes.length + 1}`,

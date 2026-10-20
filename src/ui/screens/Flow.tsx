@@ -138,9 +138,9 @@ export function FlowScreen() {
       if (def.kind === 'stereo' && ch.patchR) head[head.length - 1].sub += ` (+R ${ch.patchR.toUpperCase()})`;
     }
     head.push({ key: 'in', title: `${def.short} ${ch.name}`, sub: `gain ${fmtDb(ch.digitalGain)}${ch.polarity ? ' Ø' : ''}`, state: 'ok', tap: `ch.${sel}.in`, go: { screen: 'channel', selected: sel, focus: 'sec-input' } });
-    head.push({ key: 'hpf', title: 'HPF', sub: ch.hpfOn ? fmtHz(ch.hpfFreq) : 'bypassed', state: ch.hpfOn ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-input' } });
+    if (def.kind === 'mono') head.push({ key: 'hpf', title: 'HPF', sub: ch.hpfOn ? fmtHz(ch.hpfFreq) : 'bypassed', state: ch.hpfOn ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-input' } });
     head.push({ key: 'eq', title: 'EQ', sub: ch.eqOn ? ch.eq.filter((b) => b.gain !== 0).length + ' bands active' : 'bypassed', state: ch.eqOn ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-eq' } });
-    head.push({ key: 'gate', title: ch.gate.mode === 'ducker' ? 'DUCKER' : 'GATE', sub: ch.gate.on ? `${ch.gate.threshold} dB, range ${ch.gate.range}${ch.gate.key !== 'self' ? ` key ${ch.gate.key.toUpperCase()}` : ''}` : 'bypassed', state: ch.gate.on ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-gate' } });
+    if (def.kind === 'mono') head.push({ key: 'gate', title: ch.gate.mode === 'ducker' ? 'DUCKER' : 'GATE', sub: ch.gate.on ? `${ch.gate.threshold} dB, range ${ch.gate.range}${ch.gate.key !== 'self' ? ` key ${ch.gate.key.toUpperCase()}` : ''}` : 'bypassed', state: ch.gate.on ? 'ok' : 'bypass', go: { screen: 'channel', selected: sel, focus: 'sec-gate' } });
     head.push({ key: 'comp', title: 'COMP', sub: ch.comp.on ? `${ch.comp.threshold} dB ${ch.comp.ratio.toFixed(1)}:1` : 'bypassed', state: ch.comp.on ? 'ok' : 'bypass', tap: `ch.${sel}.pre`, go: { screen: 'channel', selected: sel, focus: 'sec-dyn' } });
     if (ch.delayOn) head.push({ key: 'dly', title: 'DELAY', sub: `${ch.delayMs.toFixed(1)} ms`, state: 'ok', go: { screen: 'channel', selected: sel, focus: 'sec-delay' } });
     const dca = dcaFor(c, sel);

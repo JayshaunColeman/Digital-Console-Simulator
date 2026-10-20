@@ -52,8 +52,13 @@ export interface ConsoleModel {
   inPorts: InPortDef[];
   outPorts: OutPortDef[];
   patchSources: PatchSourceDef[];
-  dcaCount: number;
+  dcaCount: number; // 0 = the console has no DCA groups
   muteGroupCount: number;
+  maxScenes: number;
+  features: {
+    talkback: boolean; // dedicated talkback function
+    focus: boolean; // per-scene recall focus
+  };
   geqBuses: string[]; // buses that can take the 31-band GEQ
   maxDelayMs: number;
   fxRackCount: number;
@@ -65,7 +70,7 @@ export interface ConsoleModel {
 // ---------------------------------------------------------------- state ----
 
 export interface EqBand {
-  type: 'peak' | 'lowshelf' | 'highshelf';
+  type: 'peak' | 'lowshelf' | 'highshelf' | 'lowpass';
   freq: number;
   gain: number;
   q: number;
@@ -77,8 +82,11 @@ export interface CompState {
   ratio: number;
   attack: number; // ms
   release: number; // ms
-  knee: number; // dB
-  makeup: number; // dB
+  knee: number; // dB (soft-knee width)
+  makeup: number; // dB ("OUT GAIN")
+  key: 'post' | 'pre'; // key-in: self post-EQ (normal) or self pre-EQ
+  oneKnob: boolean; // 1-knob mode: one control drives threshold / ratio / out gain
+  amount: number; // 0..10 in 1-knob mode
 }
 
 export interface GateState {
@@ -89,7 +97,9 @@ export interface GateState {
   attack: number; // ms
   hold: number; // ms
   decay: number; // ms
-  key: string; // 'self' or a channel id used as key-in (post digital gain)
+  // key-in: 'self' (self post-EQ), 'self-pre' (self pre-EQ), a channel id
+  // (that channel after its digital gain) or a mix bus id (bus output)
+  key: string;
 }
 
 export interface SendState {
@@ -134,6 +144,7 @@ export interface BusState {
   comp: CompState;
   geqOn: boolean;
   geq: number[]; // 31-band graphic EQ gains (dB), STEREO + MIX buses only
+  prePoint: 'fader' | 'eq'; // mix buses: where PRE sends are taken (BUS SETUP)
   delayOn: boolean;
   delayMs: number; // output delay 0..1000 ms
   muteGroups: number[];

@@ -31,6 +31,9 @@ export const defaultComp = (): CompState => ({
   release: 150,
   knee: 2,
   makeup: 0,
+  key: 'post',
+  oneKnob: false,
+  amount: 3,
 });
 
 export const defaultGate = (): GateState => ({
@@ -117,6 +120,7 @@ export function defaultBus(model: ConsoleModel, id: string): BusState {
     comp: defaultComp(),
     geqOn: false,
     geq: GEQ_FREQS.map(() => 0),
+    prePoint: 'fader',
     delayOn: false,
     delayMs: 0,
     muteGroups: [],
@@ -230,7 +234,15 @@ export function migrateConsole(model: ConsoleModel, raw: unknown): ConsoleState 
   const s = structuredClone(raw) as Record<string, unknown>;
   fill(s, defaultConsoleState(model) as unknown as Record<string, unknown>);
   s.version = STATE_VERSION;
-  return s as unknown as ConsoleState;
+  const c = s as unknown as ConsoleState;
+  // drop features the console does not have / clamp to its ranges
+  c.dcas = c.dcas.slice(0, model.dcaCount);
+  for (const ch of Object.values(c.channels)) {
+    ch.dca = ch.dca.filter((n) => n <= model.dcaCount);
+    ch.digitalGain = Math.max(model.digitalGainRange[0], Math.min(model.digitalGainRange[1], ch.digitalGain));
+  }
+  if (!model.features.talkback) c.talkback.on = false;
+  return c;
 }
 
 export function migrateRig(raw: unknown): RigState | null {

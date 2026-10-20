@@ -32,6 +32,7 @@ export class MeterHub {
   private grSubs = new Map<string, Set<(db: number) => void>>();
   private buf = new Float32Array(FFT);
   private raf = 0;
+  holdEnabled = true; // global PEAK HOLD key
   private last = 0;
 
   constructor(private ctx: BaseAudioContext) {}
@@ -107,7 +108,7 @@ export class MeterHub {
     const now = this.ctx.currentTime;
     return {
       peak: t.st.map((s) => s.disp),
-      hold: t.st.map((s) => s.hold),
+      hold: t.st.map((s) => (this.holdEnabled ? s.hold : NEG_INF)),
       rms: t.st.map((s) => s.rms),
       clip: t.st.map((s) => now - s.clipT < CLIP_LATCH_S),
       raw: t.st.map((s) => s.raw),

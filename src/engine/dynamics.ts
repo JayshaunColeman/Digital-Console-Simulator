@@ -1,8 +1,8 @@
 // Channel / bus dynamics as AudioWorklets:
 //   dm3-dyn1  Dynamics 1: gate / ducker. Input 0 is the audio, input 1 an
 //             optional external key (key-in).
-//   dm3-dyn2  Dynamics 2: feed-forward compressor / expander with soft knee,
-//             peak or RMS detection, stereo-linked, no hidden make-up gain.
+//   dm3-dyn2  Dynamics 2: feed-forward compressor with soft knee, peak or RMS
+//             detection, stereo-linked, optional key-in, no hidden make-up gain.
 // Both post their current gain reduction (dB) to the main thread ~40 times a
 // second for metering. Loaded from a Blob URL so it works identically in dev
 // and production builds.
@@ -72,17 +72,19 @@ class Dyn2 extends AudioWorkletProcessor {
       { name: 'knee', defaultValue: 2, automationRate: 'k-rate' },
       { name: 'makeup', defaultValue: 0, automationRate: 'k-rate' },
       { name: 'rms', defaultValue: 0, automationRate: 'k-rate' },
-      { name: 'type', defaultValue: 0, automationRate: 'k-rate' },
-      { name: 'range', defaultValue: -60, automationRate: 'k-rate' },
+      { name: 'ext', defaultValue: 0, automationRate: 'k-rate' },
     ];
   }
   constructor() {
     super();
-    this.gs = 0; this.ms = 0; this.t = 0; this.minG = 0;
+    this.gs = 0; this.ms = 0; this.env = 0; this.t = 0; this.minG = 0;
     this.msA = Math.exp(-1 / (sampleRate * 0.01)); // 10 ms RMS window
+    this.envR = Math.exp(-1 / (sampleRate * 0.03)); // peak detector: instant rise, 30 ms fall
   }
   process(inputs, outputs, p) {
     const inp = inputs[0] || [];
+    // key-in: self post-EQ (the audio itself) or an external tap (self pre-EQ)
+    const key = p.ext[0] > 0.5 ? inputs[1] || [] : inp;
     const out = outputs[0];
     const n = out[0].length;
     const T = p.threshold[0];
@@ -92,28 +94,19 @@ class Dyn2 extends AudioWorkletProcessor {
     const aR = Math.exp(-1 / (sampleRate * Math.max(0.001, p.release[0] / 1000)));
     const mk = Math.pow(10, p.makeup[0] / 20);
     const rms = p.rms[0] > 0.5;
-    const expander = p.type[0] > 0.5;
-    const floor = Math.min(0, p.range[0]);
     for (let i = 0; i < n; i++) {
       let pk = 0;
-      for (let c = 0; c < inp.length; c++) { const v = Math.abs(inp[c][i]); if (v > pk) pk = v; }
+      for (let c = 0; c < key.length; c++) { const v = Math.abs(key[c][i]); if (v > pk) pk = v; }
       let lvl;
-      if (rms) { this.ms = this.msA * this.ms + (1 - this.msA) * pk * pk; lvl = Math.sqrt(this.ms); } else lvl = pk;
+      if (rms) { this.ms = this.msA * this.ms + (1 - this.msA) * pk * pk; lvl = Math.sqrt(this.ms); }
+      else { this.env = pk > this.env ? pk : this.env * this.envR; lvl = this.env; }
       const x = lvl > 1e-6 ? 20 * Math.log10(lvl) : -120;
+      // static curve with soft knee (gain computer in dB)
+      const d = x - T;
       let gc = 0;
-      if (!expander) {
-        const d = x - T;
-        if (2 * d <= -W) gc = 0;
-        else if (W > 0 && 2 * Math.abs(d) <= W) gc = ((1 / R - 1) * (d + W / 2) * (d + W / 2)) / (2 * W);
-        else gc = d * (1 / R - 1);
-      } else {
-        // downward expander: below threshold, every dB under becomes R dB under
-        const d = x - T;
-        if (2 * d >= W) gc = 0;
-        else if (W > 0 && 2 * Math.abs(d) < W) gc = ((R - 1) * (d - W / 2) * (d - W / 2)) / (-2 * W);
-        else gc = d * (R - 1);
-        if (gc < floor) gc = floor;
-      }
+      if (2 * d <= -W) gc = 0;
+      else if (W > 0 && 2 * Math.abs(d) <= W) gc = ((1 / R - 1) * (d + W / 2) * (d + W / 2)) / (2 * W);
+      else gc = d * (1 / R - 1);
       // reduction moving down uses ATTACK, recovering uses RELEASE
       this.gs = gc < this.gs ? aA * this.gs + (1 - aA) * gc : aR * this.gs + (1 - aR) * gc;
       const g = Math.pow(10, this.gs / 20) * mk;
@@ -144,7 +137,7 @@ export class DynNode {
 
   constructor(ctx: AudioContext, channels: 1 | 2, kind: 'dm3-dyn1' | 'dm3-dyn2') {
     this.node = new AudioWorkletNode(ctx, kind, {
-      numberOfInputs: kind === 'dm3-dyn1' ? 2 : 1,
+      numberOfInputs: 2,
       numberOfOutputs: 1,
       outputChannelCount: [channels],
       channelCount: channels,

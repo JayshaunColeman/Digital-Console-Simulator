@@ -9,7 +9,12 @@
 //   - 2 internal FX racks, 6 mute groups, input + output delay 0-1000 ms,
 //     Dynamics 1 = gate/ducker, Dynamics 2 = compressor, GEQ on STEREO + MIX 1-6,
 //     oscillator: sine / pink noise / burst noise (published spec listings)
-//   - DCA groups: published listings disagree, so this is marked as unverified
+//   - No DCA groups (data sheet "DCA Group: No"; Sound On Sound + AudioTechnology reviews)
+//   - Digital gain -24..+24 dB; HPF 20-600 Hz and Dynamics 1 on CH 1-16 only;
+//     PEQ LOW = shelf/bell, HIGH = LPF/shelf/bell; Dynamics 2 = compressor only
+//     (key-in self pre/post EQ, 1-knob mode); 200 scenes; Recall Safe yes;
+//     no dedicated talkback; scene Focus not documented
+//   - Head amp range -6..+66 dB is NOT confirmed for the DM3 (spec quotes +64 dB gain)
 // Anything this file marks "simulator" is a training simplification.
 
 import type { BusDef, ChannelDef, ConsoleModel, InPortDef, OutPortDef, PatchSourceDef } from './types';
@@ -86,17 +91,20 @@ export function buildDm3Model(withDante: boolean): ConsoleModel {
     inPorts,
     outPorts,
     patchSources,
-    dcaCount: 8,
+    dcaCount: 0, // Yamaha DM3 data sheet: "DCA Group: No"
     muteGroupCount: 6,
+    maxScenes: 200,
+    features: { talkback: false, focus: false },
     geqBuses: ['st', 'mix1', 'mix2', 'mix3', 'mix4', 'mix5', 'mix6'],
     maxDelayMs: 1000,
     fxRackCount: 2,
     haGainRange: [-6, 66],
-    digitalGainRange: [-96, 24],
+    digitalGainRange: [-24, 24],
     notes: [
       'Channel counts, buses and I/O follow the published DM3 specifications.',
       'Processing uses browser Web Audio filters/compressor and a custom gate worklet; curves and timing approximate the DM3, not Yamaha\'s exact algorithms.',
-      'DCA groups: published DM3 spec listings disagree on DCA availability; the simulator provides 8 DCAs for practice. Verify on your console and firmware.',
+      'Per Yamaha\'s data sheet the DM3 has no DCA groups, no dedicated talkback and no scene Focus, so the simulator leaves them out. Use mute groups and scenes as on the real console.',
+      'Unverified against Yamaha documentation: head-amp range (-6..+66 dB), EQ/dynamics numeric ranges, HPF slope (12 dB/oct here), effect algorithm names and processing order.',
       'The browser runs at its own sample rate (usually 44.1 or 48 kHz).',
     ],
   };

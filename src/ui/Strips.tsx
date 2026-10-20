@@ -4,8 +4,14 @@ import { fmtDb, fmtPan } from '../lib/db';
 import { governingBusId, isLinked } from '../engine/routing';
 import { pairPartner } from '../model/dm3';
 
+export const IN_TAP = { prehpf: 'in', prefader: 'pre', poston: 'post' } as const;
+export const IN_LABEL = { prehpf: 'PRE HPF', prefader: 'PRE FADER', poston: 'POST ON' } as const;
+export const OUT_TAP = { preeq: 'in', prefader: 'pre', poston: 'out' } as const;
+export const OUT_LABEL = { preeq: 'PRE EQ', prefader: 'PRE FADER', poston: 'POST ON' } as const;
+
 export function ChannelStrip({ id }: { id: string }) {
   const size = useStripSize();
+  const meterIn = useStore((s) => s.ui.meterIn);
   const ch = useStore((s) => s.console.channels[id]);
   const def = useStore((s) => s.model.channels.find((c) => c.id === id)!);
   const sofRaw = useStore((s) => s.ui.sof);
@@ -83,8 +89,7 @@ export function ChannelStrip({ id }: { id: string }) {
       )}
       <div className="strip-fader">
         <div className="strip-meters">
-          <Meter tap={`ch.${id}.pre`} height={size.meter} label="PRE-fader meter (before ON/fader)" testid={`meter-${id}-pre`} />
-          <Meter tap={`ch.${id}.post`} height={size.meter} label="POST-fader meter" testid={`meter-${id}-post`} />
+          <Meter tap={`ch.${id}.${IN_TAP[meterIn]}`} height={size.meter} label={`Meter: ${IN_LABEL[meterIn]}`} testid={`meter-${id}`} />
         </div>
         <Fader
           value={faderVal}
@@ -121,6 +126,7 @@ export function ChannelStrip({ id }: { id: string }) {
 
 export function BusStrip({ id }: { id: string }) {
   const size = useStripSize();
+  const meterOut = useStore((s) => s.ui.meterOut);
   const bus = useStore((s) => s.console.buses[governingBusId(s.console, id)]);
   const own = useStore((s) => s.console.buses[id]);
   const linked = useStore((s) => isLinked(s.console, id));
@@ -148,8 +154,7 @@ export function BusStrip({ id }: { id: string }) {
       </Key>
       <div className="strip-fader">
         <div className="strip-meters">
-          <Meter tap={`bus.${id}.in`} height={size.meter} label="Bus input (sum of sends)" />
-          <Meter tap={`bus.${id}.out`} height={size.meter} label="Bus output (after master)" testid={`meter-${id}-out`} />
+          <Meter tap={`bus.${id}.${OUT_TAP[meterOut]}`} height={size.meter} label={`Meter: ${OUT_LABEL[meterOut]}`} testid={`meter-${id}`} />
         </div>
         <Fader
           value={bus.fader}

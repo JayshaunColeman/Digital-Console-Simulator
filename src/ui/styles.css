@@ -368,3 +368,6 @@ details.focus[open] { background: #15171c; padding: 4px; border-radius: 4px; dis
   .workspace.mobile { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
   .workspace.mobile .bank-layers .tab { padding: 5px 10px; }
 }
+
+.meter-points { display: grid; grid-template-columns: auto repeat(3, 1fr); gap: 3px; align-items: center; width: 100%; font-size: 10px; color: var(--dim); }
+.meter-points span:nth-child(5) { grid-column: 1; }

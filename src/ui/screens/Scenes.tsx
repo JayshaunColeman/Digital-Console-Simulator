@@ -74,6 +74,7 @@ export function ScenesScreen() {
                   <Key small kind="on" testid={`scene-recall-${i}`} topic="scene" onClick={() => store.recallScene(s.id)}>
                     RECALL
                   </Key>
+                  {model.features.focus ? (
                   <details className="focus">
                     <summary data-testid={`scene-focus-${i}`}>
                       FOCUS{s.focus && Object.values(s.focus).some((v) => v === false) ? ' *' : ''}
@@ -93,6 +94,7 @@ export function ScenesScreen() {
                       </label>
                     ))}
                   </details>
+                  ) : null}
                   <Key small onClick={() => download(s, `${s.name}.dm3sim.json`)}>EXPORT</Key>
                   <Key
                     small

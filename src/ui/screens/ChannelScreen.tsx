@@ -6,6 +6,7 @@ import { fmtDb, fmtHz, fmtPan } from '../../lib/db';
 import { NEG_INF, type CompState, type EqBand, type GateState } from '../../model/types';
 import { deviceKind, deviceLabel, governingBusId, isLinked, plugProblem } from '../../engine/routing';
 import { GEQ_FREQS } from '../../model/defaults';
+import { effectiveComp } from '../../engine/compParams';
 import { pairKeyOf, pairPartner } from '../../model/dm3';
 import { defaultEq, defaultComp } from '../../model/defaults';
 
@@ -44,16 +45,21 @@ export function EqSection({ bands, eqOn, onToggle, onBand, onReset, hpf }: {
                 small
                 on={b.type !== 'peak'}
                 topic="eq"
-                onClick={() => onBand(i, { type: b.type === 'peak' ? (i === 0 ? 'lowshelf' : 'highshelf') : 'peak' })}
+                testid={`eq-type-${i}`}
+                onClick={() =>
+                  onBand(i, {
+                    type: i === 0 ? (b.type === 'peak' ? 'lowshelf' : 'peak') : b.type === 'peak' ? 'highshelf' : b.type === 'highshelf' ? 'lowpass' : 'peak',
+                  })
+                }
               >
-                {b.type === 'peak' ? 'PEAK' : 'SHELF'}
+                {b.type === 'peak' ? 'BELL' : b.type === 'lowpass' ? 'LPF' : 'SHELF'}
               </Key>
             ) : (
               <span className="spacer-key">PEAK</span>
             )}
-            <Knob label="GAIN" value={b.gain} min={-18} max={18} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="eq" testid={`eq-gain-${i}`} onChange={(v) => onBand(i, { gain: v })} />
+            <Knob label="GAIN" value={b.gain} min={-18} max={18} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="eq" testid={`eq-gain-${i}`} disabled={b.type === 'lowpass'} onChange={(v) => onBand(i, { gain: v })} />
             <Knob label="FREQ" value={b.freq} min={20} max={20000} log reset={[100, 400, 2500, 8000][i]} fmt={fmtHz} topic="eq" testid={`eq-freq-${i}`} onChange={(v) => onBand(i, { freq: Math.round(v) })} />
-            <Knob label="Q" value={b.q} min={0.1} max={16} log reset={i === 0 || i === 3 ? 0.7 : 2} fmt={(v) => v.toFixed(2)} topic="eq" disabled={b.type !== 'peak'} onChange={(v) => onBand(i, { q: v })} />
+            <Knob label="Q" value={b.q} min={0.1} max={16} log reset={i === 0 || i === 3 ? 0.7 : 2} fmt={(v) => v.toFixed(2)} topic="eq" disabled={b.type !== 'peak' && b.type !== 'lowpass'} onChange={(v) => onBand(i, { q: v })} />
           </div>
         ))}
       </div>
@@ -62,18 +68,28 @@ export function EqSection({ bands, eqOn, onToggle, onBand, onReset, hpf }: {
 }
 
 export function CompSection({ c, onChange, grId, meterTap }: { c: CompState; onChange: (p: Partial<CompState>) => void; grId: string; meterTap: string }) {
+  const e = effectiveComp(c);
+  const k = c.oneKnob; // in 1-knob mode the individual controls are driven by AMOUNT
   return (
     <Section
       title="DYNAMICS 2 · COMP"
       id="sec-dyn"
       right={
-        <Key small on={c.on} kind="on" onClick={() => onChange({ on: !c.on })} topic="comp" testid="comp-on">
-          COMP {c.on ? 'ON' : 'OFF'}
-        </Key>
+        <div className="row">
+          <Key small on={c.oneKnob} kind="accent" onClick={() => onChange({ oneKnob: !c.oneKnob })} topic="comp" testid="comp-1knob">
+            1-KNOB
+          </Key>
+          <Key small on={c.key === 'pre'} onClick={() => onChange({ key: c.key === 'pre' ? 'post' : 'pre' })} topic="comp" testid="comp-key" title="Key in: self post-EQ (normal) or self pre-EQ">
+            KEY {c.key === 'pre' ? 'PRE EQ' : 'POST EQ'}
+          </Key>
+          <Key small on={c.on} kind="on" onClick={() => onChange({ on: !c.on })} topic="comp" testid="comp-on">
+            COMP {c.on ? 'ON' : 'OFF'}
+          </Key>
+        </div>
       }
     >
       <div className="comp-wrap">
-        <CompCurve c={c} />
+        <CompCurve c={{ ...c, ...e }} />
         <div className="comp-meters">
           <Meter tap={meterTap} height={120} label="Signal after dynamics (PRE-fader)" />
           <div>
@@ -81,15 +97,34 @@ export function CompSection({ c, onChange, grId, meterTap }: { c: CompState; onC
             <small>GR</small>
           </div>
         </div>
-        <div className="knob-grid">
-          <Knob label="THRESH" value={c.threshold} min={-60} max={0} step={0.5} reset={-20} fmt={(v) => `${v.toFixed(1)}`} topic="comp" testid="comp-threshold" onChange={(v) => onChange({ threshold: v })} />
-          <Knob label="RATIO" value={c.ratio} min={1} max={20} log reset={4} fmt={(v) => `${v.toFixed(1)}:1`} topic="comp" testid="comp-ratio" onChange={(v) => onChange({ ratio: v })} />
-          <Knob label="ATTACK" value={c.attack} min={0.1} max={200} log reset={10} fmt={(v) => `${v.toFixed(1)}ms`} topic="comp" onChange={(v) => onChange({ attack: v })} />
-          <Knob label="RELEASE" value={c.release} min={10} max={1000} log reset={150} fmt={(v) => `${Math.round(v)}ms`} topic="comp" onChange={(v) => onChange({ release: v })} />
-          <Knob label="KNEE" value={c.knee} min={0} max={20} step={0.5} reset={2} fmt={(v) => `${v.toFixed(1)}`} topic="comp" onChange={(v) => onChange({ knee: v })} />
-          <Knob label="MAKEUP" value={c.makeup} min={0} max={24} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="comp" testid="comp-makeup" onChange={(v) => onChange({ makeup: v })} />
-        </div>
+        {k ? (
+          <div className="knob-grid">
+            <Knob label="AMOUNT" size={56} value={c.amount} min={0} max={10} step={0.1} reset={3} fmt={(v) => v.toFixed(1)} topic="comp" testid="comp-amount" onChange={(v) => onChange({ amount: v })} />
+            <div className="note mono">
+              THR {e.threshold.toFixed(1)} dB
+              <br />
+              RATIO {e.ratio.toFixed(1)}:1
+              <br />
+              OUT {fmtDb(e.makeup)} dB
+              <br />
+              ATK 25 ms · REL 296 ms · KNEE MED
+            </div>
+          </div>
+        ) : (
+          <div className="knob-grid">
+            <Knob label="THRESH" value={c.threshold} min={-60} max={0} step={0.5} reset={-20} fmt={(v) => `${v.toFixed(1)}`} topic="comp" testid="comp-threshold" onChange={(v) => onChange({ threshold: v })} />
+            <Knob label="RATIO" value={c.ratio} min={1} max={20} log reset={4} fmt={(v) => `${v.toFixed(1)}:1`} topic="comp" testid="comp-ratio" onChange={(v) => onChange({ ratio: v })} />
+            <Knob label="ATTACK" value={c.attack} min={0.1} max={120} log reset={10} fmt={(v) => `${v.toFixed(1)}ms`} topic="comp" onChange={(v) => onChange({ attack: v })} />
+            <Knob label="RELEASE" value={c.release} min={5} max={5000} log reset={150} fmt={(v) => (v >= 1000 ? `${(v / 1000).toFixed(2)}s` : `${Math.round(v)}ms`)} topic="comp" onChange={(v) => onChange({ release: v })} />
+            <Knob label="KNEE" value={c.knee} min={0} max={20} step={0.5} reset={2} fmt={(v) => (v === 0 ? 'HARD' : `${v.toFixed(1)}`)} topic="comp" onChange={(v) => onChange({ knee: v })} />
+            <Knob label="OUT GAIN" value={c.makeup} min={-20} max={24} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="comp" testid="comp-makeup" onChange={(v) => onChange({ makeup: v })} />
+          </div>
+        )}
       </div>
+      <p className="note">
+        Feed-forward compressor, stereo-linked, no hidden make-up gain. 1-KNOB uses Yamaha&apos;s fixed attack 25 ms / release 296 ms / knee
+        Med; the amount → threshold/ratio/gain mapping is an approximation.
+      </p>
     </Section>
   );
 }
@@ -339,14 +374,20 @@ function ChannelView({ id }: { id: string }) {
             portBlock(ch.patchL, null)
           )}
           <div className="row">
-            <Knob label="DIGITAL GAIN" value={ch.digitalGain} min={-96} max={24} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="digital-gain" testid="digital-gain" onChange={(v) => upd((c) => (c.digitalGain = v))} />
+            <Knob label="DIGITAL GAIN" value={ch.digitalGain} min={model.digitalGainRange[0]} max={model.digitalGainRange[1]} step={0.5} reset={0} fmt={(v) => fmtDb(v)} topic="digital-gain" testid="digital-gain" onChange={(v) => upd((c) => (c.digitalGain = v))} />
             <Key on={ch.polarity} kind="warn" onClick={() => upd((c) => (c.polarity = !ch.polarity))} topic="polarity" testid="polarity">
               Ø
             </Key>
-            <Key on={ch.hpfOn} kind="on" onClick={() => upd((c) => (c.hpfOn = !ch.hpfOn))} topic="hpf" testid="hpf-on">
-              HPF
-            </Key>
-            <Knob label="HPF FREQ" value={ch.hpfFreq} min={20} max={600} log reset={80} fmt={fmtHz} topic="hpf" testid="hpf-freq" disabled={!ch.hpfOn} onChange={(v) => upd((c) => (c.hpfFreq = Math.round(v)))} />
+            {def.kind === 'mono' ? (
+              <>
+                <Key on={ch.hpfOn} kind="on" onClick={() => upd((c) => (c.hpfOn = !ch.hpfOn))} topic="hpf" testid="hpf-on">
+                  HPF
+                </Key>
+                <Knob label="HPF FREQ" value={ch.hpfFreq} min={20} max={600} log reset={80} fmt={fmtHz} topic="hpf" testid="hpf-freq" disabled={!ch.hpfOn} onChange={(v) => upd((c) => (c.hpfFreq = Math.round(v)))} />
+              </>
+            ) : (
+              <span className="note">HPF and DYN 1 are on CH 1-16 only.</span>
+            )}
             <div className="meter-labeled">
               <Meter tap={`ch.${id}.in`} height={80} label="Channel IN (after digital gain)" />
               <small>IN</small>
@@ -359,21 +400,25 @@ function ChannelView({ id }: { id: string }) {
         <EqSection
           bands={ch.eq}
           eqOn={ch.eqOn}
-          hpf={{ on: ch.hpfOn, freq: ch.hpfFreq }}
+          hpf={{ on: def.kind === 'mono' && ch.hpfOn, freq: ch.hpfFreq }}
           onToggle={() => upd((c) => (c.eqOn = !ch.eqOn))}
           onBand={(i, b) => upd((c) => Object.assign(c.eq[i], b))}
           onReset={() => upd((c) => (c.eq = defaultEq()))}
         />
 
-        <GateSection
-          g={ch.gate}
-          grId={`ch.${id}.gate`}
-          onChange={(p) => upd((c) => Object.assign(c.gate, p))}
-          keyOptions={[
-            { value: 'self', label: 'SELF' },
-            ...model.channels.filter((k) => k.id !== id && k.kind !== 'fxreturn').map((k) => ({ value: k.id, label: `${k.short} ${consoleState.channels[k.id].name}` })),
-          ]}
-        />
+        {def.kind === 'mono' ? (
+          <GateSection
+            g={ch.gate}
+            grId={`ch.${id}.gate`}
+            onChange={(p) => upd((c) => Object.assign(c.gate, p))}
+            keyOptions={[
+              { value: 'self', label: 'SELF POST EQ' },
+              { value: 'self-pre', label: 'SELF PRE EQ' },
+              ...model.channels.filter((k) => k.id !== id && k.kind !== 'fxreturn').map((k) => ({ value: k.id, label: `${k.short} ${consoleState.channels[k.id].name}` })),
+              ...model.buses.filter((b) => b.kind === 'mix').map((b) => ({ value: b.id, label: consoleState.buses[b.id].name })),
+            ]}
+          />
+        ) : null}
 
         <CompSection c={ch.comp} grId={`ch.${id}.gr`} meterTap={`ch.${id}.pre`} onChange={(p) => upd((c) => Object.assign(c.comp, p))} />
 
@@ -394,6 +439,7 @@ function ChannelView({ id }: { id: string }) {
               <small>POST</small>
             </div>
           </div>
+          {consoleState.dcas.length ? (
           <div className="dca-row">
             <span>DCA</span>
             {consoleState.dcas.map((d, i) => (
@@ -410,6 +456,7 @@ function ChannelView({ id }: { id: string }) {
               </Key>
             ))}
           </div>
+          ) : null}
           <GroupKeys label="MUTE GRP" prefix="mg-assign" count={consoleState.muteGroups.length} value={ch.muteGroups} topic="mute-group" onToggle={(n) => upd((c) => (c.muteGroups = toggleIn(c.muteGroups, n)))} />
           <table className="sends">
             <thead>
@@ -546,7 +593,18 @@ function BusView({ id }: { id: string }) {
               </div>
             ) : null}
           </div>
-          <GroupKeys label="MUTE GRP" prefix="bus-mg-assign" count={consoleState.muteGroups.length} value={b.muteGroups} topic="mute-group" onToggle={(n) => upd((x) => (x.muteGroups = toggleIn(x.muteGroups, n)))} />
+          {def.kind === 'mix' ? (
+            <div className="dca-row">
+              <span>PRE SENDS FROM</span>
+              <Key small on={b.prePoint === 'fader'} topic="pre-post" testid="prepoint-fader" onClick={() => upd((x) => (x.prePoint = 'fader'))}>
+                PRE FADER
+              </Key>
+              <Key small on={b.prePoint === 'eq'} topic="pre-post" testid="prepoint-eq" onClick={() => upd((x) => (x.prePoint = 'eq'))}>
+                PRE EQ
+              </Key>
+            </div>
+          ) : null}
+                    <GroupKeys label="MUTE GRP" prefix="bus-mg-assign" count={consoleState.muteGroups.length} value={b.muteGroups} topic="mute-group" onToggle={(n) => upd((x) => (x.muteGroups = toggleIn(x.muteGroups, n)))} />
           <p className="note">
             Feeding this bus:{' '}
             {contributors.length ? contributors.map((c) => consoleState.channels[c.id].name).join(', ') : <b className="bad">no channels</b>}

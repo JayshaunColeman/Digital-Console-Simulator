@@ -9,6 +9,7 @@
 
 import type { ConsoleState, RigState } from '../model/types';
 import { NEG_INF } from '../model/types';
+import { defaultComp } from '../model/defaults';
 import type { CheckCtx, CheckResult, Exercise } from './types';
 
 // ------------------------------------------------------------------ helpers --
@@ -458,32 +459,35 @@ export const EXERCISES: Exercise[] = [
   },
 
   {
-    id: 'drum-mix-and-dca',
+    id: 'drum-mix-and-mute-group',
     level: 'intermediate',
-    title: 'Drum bus mix and DCA',
-    goal: 'Send kick, snare and hi-hat to MIX 3 (the drummer\'s wedge) and group the three drum channels in one DCA.',
+    title: 'Drum wedge mix and a drum mute group',
+    goal: 'Send kick, snare and hi-hat to MIX 3 (the drummer\'s wedge) and put the three drum channels in one mute group (for example MUTE GROUP 1), ready for one-key muting but not engaged.',
     steps: [
       'Select MIX 3 with SENDS ON FADER and bring kick, snare and hi-hat up in the mix.',
       'Check MIX 3 is patched to OMNI OUT 3 in I/O PATCH.',
-      'In SELECTED CH > ROUTING for channels 2, 3 and 4 assign each to the same DCA group (for example DCA 1).',
-      'Check that the DCA is on so the drums still sound.',
+      'In SELECTED CH > MUTE GROUP for channels 2, 3 and 4 press the same assign key (for example 1).',
+      'Leave the group disengaged in the MASTER section so the drums still sound. (The DM3 has no DCA groups: a mute group is how you grab several channels with one key.)',
     ],
     hints: [
-      'DCA assignment is in the ROUTING section of SELECTED CH.',
-      'All three channels must be in the same DCA number.',
-      'Use the DCA fader to confirm all three drums move together.',
+      'Mute group assignment is in SELECTED CH > MUTE GROUP; the group key in the MASTER section does the actual muting.',
+      'All three channels must be in the same mute group number, and the vocal does not belong in it.',
+      'An assigned but disengaged group does nothing yet: that is exactly the state you want before the song starts.',
     ],
     check: (ctx) => {
       const drums = ['ch2', 'ch3', 'ch4'];
       const names = ['Kick', 'Snare', 'Hi-hat'];
       const levels = drums.map((d) => ctx.gain(`ch:${d}`, 'out:omni3'));
-      const shared = ctx.state.dcas.findIndex((_, i) => drums.every((d) => ctx.state.channels[d].dca.includes(i + 1)));
-      const dcaOn = shared >= 0 && ctx.state.dcas[shared].on;
+      const shared = ctx.state.muteGroups.findIndex((_, i) =>
+        drums.every((d) => ctx.state.channels[d].muteGroups.includes(i + 1)),
+      );
+      const engaged = shared >= 0 && ctx.state.muteGroups[shared].on;
       return soft(
         [
           ...drums.map((_, i): Item => [`${names[i]} reaches OMNI OUT 3`, levels[i] > -30 && levels[i] <= 6]),
-          ['Kick, snare and hi-hat share one DCA', shared >= 0],
-          ['That DCA is switched on', dcaOn],
+          ['Kick, snare and hi-hat share one mute group', shared >= 0],
+          ['That mute group is not engaged (drums still sound)', shared >= 0 && !engaged],
+          ['The vocal is not in the drum group', shared >= 0 && !ctx.state.channels.ch1.muteGroups.includes(shared + 1)],
         ],
         [['Signal at OMNI OUT 3', ctx.peak('out.omni3') > -60]],
         ctx,
@@ -626,6 +630,43 @@ export const EXERCISES: Exercise[] = [
           ['Keys at least as loud as vocal in the main mix', sk - sv >= 0],
         ],
         [],
+        ctx,
+      );
+    },
+  },
+
+  {
+    id: 'one-knob-compressor',
+    level: 'intermediate',
+    title: 'Compress the vocal in 1-knob mode',
+    goal: 'Use Dynamics 2 on the vocal in 1-KNOB mode: compressor on, 1-KNOB on, AMOUNT between 3 and 7, vocal still in the PA.',
+    steps: [
+      'Select channel 1 (Vocal) and open SELECTED CH > DYNAMICS 2 · COMP.',
+      'Switch the compressor ON and switch on 1-KNOB mode: one AMOUNT control now drives threshold, ratio and out gain together.',
+      'Press POWER and PLAY ALL, then raise AMOUNT while watching the gain-reduction meter.',
+      'Leave AMOUNT between 3 and 7: a few dB of reduction on the peaks, not a squashed vocal.',
+    ],
+    hints: [
+      '1-KNOB mode trades the detailed controls for a single AMOUNT (0 to 10); more amount means more compression.',
+      'Aim for a few dB of gain reduction on the loud syllables; 10 on the dial is an effect, not a mix tool.',
+      'The vocal must stay assigned to STEREO and reach the PA.',
+    ],
+    setup: (s: ConsoleState) => {
+      s.channels.ch1.comp = { ...defaultComp(), amount: 0 };
+    },
+    check: (ctx) => {
+      const c = ctx.state.channels.ch1.comp;
+      return soft(
+        [
+          ['Vocal compressor is on', c.on],
+          ['1-KNOB mode is on', c.oneKnob],
+          ['AMOUNT between 3 and 7', c.amount >= 3 && c.amount <= 7],
+          ['Vocal reaching the PA (OMNI OUT 7)', ctx.gain('ch:ch1', 'out:omni7') > -40],
+        ],
+        [
+          ['Vocal signal present (channel 1 post-fader)', ctx.peak('ch.ch1.post') > -60],
+          ['Gain reduction under 12 dB', ctx.gr('ch.ch1.gr') > -12],
+        ],
         ctx,
       );
     },
@@ -940,34 +981,34 @@ export const EXERCISES: Exercise[] = [
   },
 
   {
-    id: 'ducking-backing',
+    id: 'ducking-keys',
     level: 'advanced',
-    title: 'Duck the backing track under the vocal',
-    goal: 'Use the ducker on the backing track (ST IN): Dynamics 1 on, mode DUCKER, key from channel 1 (the vocal), range between -20 and -6 dB.',
+    title: 'Duck the keys under the vocal',
+    goal: 'Use the ducker on the keys (channel 6): Dynamics 1 on, mode DUCKER, key from channel 1 (the vocal), range between -20 and -6 dB.',
     steps: [
-      'Select the ST IN channel (Backing) and open SELECTED CH > DYNAMICS 1 · GATE/DUCKER.',
+      'Select channel 6 (Keys) and open SELECTED CH > DYNAMICS 1 · GATE/DUCKER. (On the DM3 Dynamics 1 exists on CH 1-16 only, not on ST IN, so the ducked source has to be a mono channel.)',
       'Change the mode from GATE to DUCKER and switch Dynamics 1 ON.',
-      'Set the KEY source to channel 1 (Vocal) so the ducker listens to the singer rather than the backing track itself.',
-      'Set the RANGE between -20 and -6 dB, the THRESHOLD around the level of the vocal, and a slowish DECAY (300 ms or more) so the backing swells back smoothly.',
+      'Set the KEY source to channel 1 (Vocal) so the ducker listens to the singer rather than the keys themselves.',
+      'Set the RANGE between -20 and -6 dB, the THRESHOLD around the level of the vocal, and a slowish DECAY (300 ms or more) so the keys swell back smoothly.',
       'Play the band and watch the ducker meter dip whenever the vocal is loud.',
     ],
     hints: [
       'A ducker lowers its own channel by RANGE while the key signal is above the threshold - the opposite of a gate.',
-      'KEY = SELF would duck the backing track by its own level, which is not what we want. Pick channel 1.',
-      'RANGE is how far the backing dips: -6 dB is subtle, -20 dB is dramatic.',
+      'KEY = SELF would duck the keys by their own level, which is not what we want. Pick channel 1.',
+      'RANGE is how far the keys dip: -6 dB is subtle, -20 dB is dramatic.',
     ],
     check: (ctx) => {
-      const g = ctx.state.channels.stin.gate;
+      const g = ctx.state.channels.ch6.gate;
       return soft(
         [
-          ['Backing track dynamics 1 is on', g.on],
+          ['Keys dynamics 1 is on', g.on],
           ['Mode is DUCKER', g.mode === 'ducker'],
           ['Keyed from channel 1 (the vocal)', g.key === 'ch1'],
           ['Range between -20 and -6 dB', g.range >= -20 && g.range <= -6],
-          ['Backing track still reaching the PA (OMNI OUT 7)', ctx.gain('ch:stin', 'out:omni7') > -40],
+          ['Keys still reaching the PA (OMNI OUT 7)', ctx.gain('ch:ch6', 'out:omni7') > -40],
         ],
         [
-          ['Backing track is playing', ctx.peak('ch.stin.in') > -60],
+          ['Keys are playing', ctx.peak('ch.ch6.in') > -60],
           ['Vocal key signal is present (channel 1 input meter)', ctx.peak('ch.ch1.in') > -60],
         ],
         ctx,

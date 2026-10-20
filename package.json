@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "test:e2e": "node tests/e2e/run-acceptance.mjs"
+    "test:e2e": "node tests/e2e/run-acceptance.mjs",
+    "test:mobile": "node tests/e2e/mobile-smoke.mjs"
   },
   "dependencies": {
     "immer": "^11.1.21",

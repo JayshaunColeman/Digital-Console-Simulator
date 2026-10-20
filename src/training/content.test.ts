@@ -80,8 +80,8 @@ const SCENARIO_FIX: Record<string, Fix> = {
   'reverb-return-silent': (s) => {
     s.channels.fxr1.on = true;
   },
-  'multi-dca-and-patch': (s) => {
-    s.dcas[0].on = true;
+  'multi-mutegroup-and-patch': (s) => {
+    s.muteGroups[2].on = false;
     s.outPorts.omni1.source = 'mix1';
   },
   'multi-keys-wedge-dead': (s) => {
@@ -101,11 +101,11 @@ const SCENARIO_FIX: Record<string, Fix> = {
   'oscillator-left-on': (s) => {
     s.osc.on = false;
   },
-  'talkback-latched': (s) => {
-    s.talkback.on = false;
+  'talkback-channel-left-on': (s) => {
+    s.channels.ch8.on = false;
   },
   'ducker-wrong-key': (s) => {
-    s.channels.stin.gate.key = 'ch1';
+    s.channels.ch6.gate.key = 'ch1';
   },
   'delay-misaligned': (s) => {
     s.buses.mtx1.delayMs = 30;
@@ -153,12 +153,16 @@ const SCENARIO_BAD: Record<string, Fix[]> = {
       s.channels.fxr1.on = true;
     },
   ],
-  'multi-dca-and-patch': [
+  'multi-mutegroup-and-patch': [
     (s) => {
-      s.dcas[0].on = true; // patch still wrong
+      s.muteGroups[2].on = false; // patch still wrong
     },
     (s) => {
-      s.outPorts.omni1.source = 'mix1'; // DCA still muted
+      s.outPorts.omni1.source = 'mix1'; // mute group still engaged
+    },
+    (s) => {
+      s.channels.ch1.muteGroups = [];
+      s.buses.mix2.on = false; // patch still wrong, keys wedge killed
     },
   ],
   'multi-keys-wedge-dead': [
@@ -232,36 +236,46 @@ const SCENARIO_BAD: Record<string, Fix[]> = {
       s.osc.on = false;
     },
   ],
-  'talkback-latched': [
+  'talkback-channel-left-on': [
     (s) => {
-      s.buses.mix1.on = false;
-      s.buses.mix2.on = false;
-      s.buses.mix3.on = false;
-      s.buses.mix4.on = false;
+      for (const b of ['mix1', 'mix2', 'mix3', 'mix4']) s.buses[b].on = false; // muting the wedges
     },
     (s) => {
-      s.talkback.level = NEG_INF; // still latched on and assigned
+      s.channels.ch8.fader = NEG_INF; // pre-fader sends ignore the fader
+      s.channels.ch8.toSt = false;
     },
     (s) => {
-      s.talkback.on = false;
-      s.channels.ch1.sends.mix1.on = false;
+      for (const b of ['mix1', 'mix2', 'mix3']) s.channels.ch8.sends[b].on = false; // Wedge 4 still gets chatter
+    },
+    (_s, r) => {
+      r.plugs.in8 = null; // unplugged the mic: no talkback at all
+    },
+    (s) => {
+      s.channels.ch8.on = false;
+      s.channels.ch1.sends.mix1.on = false; // lost the vocal wedge
     },
   ],
   'ducker-wrong-key': [
     (s) => {
-      s.channels.stin.gate.key = 'self';
+      s.channels.ch6.gate.key = 'self';
     },
     (s) => {
-      s.channels.stin.gate.key = 'ch1';
-      s.channels.stin.gate.mode = 'gate'; // a gate keyed by the vocal does the opposite
+      s.channels.ch6.gate.key = 'self-pre';
     },
     (s) => {
-      s.channels.stin.gate.key = 'ch1';
-      s.channels.stin.gate.range = -80; // ducks the backing out completely
+      s.channels.ch6.gate.key = 'mix1'; // a wedge bus is not the singer
     },
     (s) => {
-      s.channels.stin.gate.on = false;
-      s.channels.stin.on = false; // backing muted instead
+      s.channels.ch6.gate.key = 'ch1';
+      s.channels.ch6.gate.mode = 'gate'; // a gate keyed by the vocal does the opposite
+    },
+    (s) => {
+      s.channels.ch6.gate.key = 'ch1';
+      s.channels.ch6.gate.range = -80; // ducks the keys out completely
+    },
+    (s) => {
+      s.channels.ch6.gate.on = false;
+      s.channels.ch6.on = false; // keys muted instead
     },
   ],
   'delay-misaligned': [
@@ -426,11 +440,16 @@ const EX_SOLUTION: Record<string, Fix> = {
     s.channels.ch1.sends.mix1 = { on: true, level: 0, pre: true, pan: 0 };
     s.channels.stin.sends.mix1 = { on: true, level: -9, pre: true, pan: 0 };
   },
-  'drum-mix-and-dca': (s) => {
+  'drum-mix-and-mute-group': (s) => {
     for (const id of ['ch2', 'ch3', 'ch4']) {
       s.channels[id].sends.mix3 = { on: true, level: -3, pre: true, pan: 0 };
-      s.channels[id].dca = [1];
+      s.channels[id].muteGroups = [1];
     }
+  },
+  'one-knob-compressor': (s) => {
+    s.channels.ch1.comp.on = true;
+    s.channels.ch1.comp.oneKnob = true;
+    s.channels.ch1.comp.amount = 5;
   },
   'pre-fader-sends': (s) => {
     s.channels.ch1.sends.mix1.pre = true;
@@ -490,8 +509,8 @@ const EX_SOLUTION: Record<string, Fix> = {
   'input-to-matrix': (s) => {
     s.channels.ch1.sends.mtx1 = { on: true, level: -6, pre: false, pan: 0 };
   },
-  'ducking-backing': (s) => {
-    s.channels.stin.gate = { on: true, mode: 'ducker', threshold: -30, range: -12, attack: 10, hold: 100, decay: 400, key: 'ch1' };
+  'ducking-keys': (s) => {
+    s.channels.ch6.gate = { on: true, mode: 'ducker', threshold: -30, range: -12, attack: 10, hold: 100, decay: 400, key: 'ch1' };
   },
   'ring-out-with-osc': (s) => {
     s.osc = { on: true, type: 'pink', freq: 1000, level: -20, assign: ['mix1'] };
@@ -524,7 +543,7 @@ describe('exercises', () => {
   it('counts and ordering', () => {
     const byLevel = (l: string) => EXERCISES.filter((e) => e.level === l).length;
     expect(byLevel('beginner')).toBe(11);
-    expect(byLevel('intermediate')).toBe(9);
+    expect(byLevel('intermediate')).toBe(10);
     expect(byLevel('advanced')).toBe(8);
     expect(new Set(EXERCISES.map((e) => e.id)).size).toBe(EXERCISES.length);
     const order = EXERCISES.map((e) => e.level);
@@ -640,11 +659,27 @@ describe('exercises', () => {
     expect(run('input-to-matrix', (s) => { s.channels.ch1.sends.mtx1.on = false; })).toBe(false);
     expect(run('input-to-matrix', (s) => { s.channels.ch1.sends.mtx1.level = -30; })).toBe(false);
     expect(run('input-to-matrix', (s) => { s.channels.ch1.toSt = false; })).toBe(false);
-    // ducker
-    expect(run('ducking-backing', (s) => { s.channels.stin.gate.mode = 'gate'; })).toBe(false);
-    expect(run('ducking-backing', (s) => { s.channels.stin.gate.key = 'self'; })).toBe(false);
-    expect(run('ducking-backing', (s) => { s.channels.stin.gate.range = -40; })).toBe(false);
-    expect(run('ducking-backing', (s) => { s.channels.stin.gate.range = -3; })).toBe(false);
+    // ducker (on a mono channel: Dynamics 1 does not exist on ST IN)
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.mode = 'gate'; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.key = 'self'; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.key = 'self-pre'; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.key = 'ch2'; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.range = -40; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.range = -3; })).toBe(false);
+    expect(run('ducking-keys', (s) => { s.channels.ch6.gate.on = false; })).toBe(false);
+    // drum mute group: not shared, engaged (drums silent), vocal included
+    expect(run('drum-mix-and-mute-group', (s) => { s.channels.ch4.muteGroups = [2]; })).toBe(false);
+    expect(run('drum-mix-and-mute-group', (s) => { s.muteGroups[0].on = true; })).toBe(false);
+    expect(run('drum-mix-and-mute-group', (s) => { s.channels.ch1.muteGroups = [1]; })).toBe(false);
+    expect(run('drum-mix-and-mute-group', (s) => { s.channels.ch3.sends.mix3.on = false; })).toBe(false);
+    // 1-knob compressor
+    expect(run('one-knob-compressor', (s) => { s.channels.ch1.comp.oneKnob = false; })).toBe(false);
+    expect(run('one-knob-compressor', (s) => { s.channels.ch1.comp.on = false; })).toBe(false);
+    expect(run('one-knob-compressor', (s) => { s.channels.ch1.comp.amount = 10; })).toBe(false);
+    expect(run('one-knob-compressor', (s) => { s.channels.ch1.comp.amount = 1; })).toBe(false);
+    expect(run('one-knob-compressor', (s) => { s.channels.ch1.toSt = false; })).toBe(false);
+    expect(run('one-knob-compressor', () => {}, { ...loud, gr: () => -20 })).toBe(false);
+    expect(run('one-knob-compressor', () => {}, { ...loud, gr: () => -6 })).toBe(true);
     // oscillator ring-out
     expect(run('ring-out-with-osc', (s) => { s.osc.assign = ['mix1', 'mix2']; })).toBe(false);
     expect(run('ring-out-with-osc', (s) => { s.osc.assign = ['st']; })).toBe(false);
@@ -662,7 +697,7 @@ describe('exercises', () => {
   });
 
   it('new-feature exercises: soft ones pass with audio off', () => {
-    for (const id of ['noise-gate', 'mute-groups', 'input-to-matrix', 'ducking-backing', 'ring-out-with-osc', 'delay-speaker-alignment']) {
+    for (const id of ['noise-gate', 'mute-groups', 'drum-mix-and-mute-group', 'one-knob-compressor', 'input-to-matrix', 'ducking-keys', 'ring-out-with-osc', 'delay-speaker-alignment']) {
       const { model, s, r } = fresh();
       const ex = EXERCISES.find((e) => e.id === id)!;
       ex.setup?.(s, r, model);
@@ -727,28 +762,67 @@ describe('new-feature scenarios: extra checks', () => {
     expect(sc.check(makeCtx(model, s, r)).ok).toBe(false);
   });
 
-  it('oscillator / talkback: unassigning wedges also fixes', () => {
+  it('oscillator: unassigning wedges also fixes', () => {
+    const sc = get('oscillator-left-on');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    s.osc.assign = [];
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+  });
+
+  it('talkback: the engineer mic is channel 8 sent pre-fader to the wedges; any real fix works', () => {
+    const sc = get('talkback-channel-left-on');
     {
-      const sc = get('oscillator-left-on');
       const { model, s, r } = fresh();
       sc.setup(s, r, model);
-      s.osc.assign = [];
-      expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+      expect(s.channels.ch8.name).toBe('Mic');
+      expect(s.channels.ch8.on).toBe(true);
+      for (const b of ['mix1', 'mix2', 'mix3', 'mix4']) expect(s.channels.ch8.sends[b].pre).toBe(true);
+      expect(r.plugs.in8?.device).toBe('mic');
+      // nothing audible in the PA: the fader is parked
+      expect(gainToDb(pathGain(buildRoutingGraph(model, s, r), 'ch:ch8', 'out:omni7'))).toBe(NEG_INF);
     }
-    {
-      const sc = get('talkback-latched');
+    const fixes: Fix[] = [
+      (s) => {
+        s.channels.ch8.on = false;
+      },
+      (s) => {
+        for (const b of ['mix1', 'mix2', 'mix3', 'mix4']) s.channels.ch8.sends[b].on = false;
+      },
+      (s) => {
+        for (const b of ['mix1', 'mix2', 'mix3', 'mix4']) s.channels.ch8.sends[b].level = NEG_INF;
+      },
+      (s) => {
+        s.channels.ch8.muteGroups = [4];
+        s.muteGroups[3].on = true;
+      },
+    ];
+    for (const f of fixes) {
       const { model, s, r } = fresh();
       sc.setup(s, r, model);
-      s.talkback.assign = [];
-      expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
+      f(s, r);
+      const res = sc.check(makeCtx(model, s, r));
+      expect(res.ok, res.detail.join(' | ')).toBe(true);
+      expect(sc.check(makeCtx(model, s, r, loud)).ok).toBe(true);
     }
+  });
+
+  it('mute-group multi-fault: removing ch1 from the group also works', () => {
+    const sc = get('multi-mutegroup-and-patch');
+    const { model, s, r } = fresh();
+    sc.setup(s, r, model);
+    s.channels.ch1.muteGroups = [];
+    s.outPorts.omni1.source = 'mix1';
+    expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
   });
 
   it('ducker: switching it off is accepted', () => {
     const sc = get('ducker-wrong-key');
     const { model, s, r } = fresh();
     sc.setup(s, r, model);
-    s.channels.stin.gate.on = false;
+    expect(s.channels.ch6.gate.mode).toBe('ducker');
+    expect(s.channels.ch6.gate.key).toBe('ch2');
+    s.channels.ch6.gate.on = false;
     expect(sc.check(makeCtx(model, s, r)).ok).toBe(true);
   });
 
@@ -760,6 +834,42 @@ describe('new-feature scenarios: extra checks', () => {
     for (const [ms, ok] of [[10, true], [80, true], [9, false], [81, false]] as const) {
       s.buses.mtx1.delayMs = ms;
       expect(sc.check(makeCtx(model, s, r)).ok, `${ms} ms`).toBe(ok);
+    }
+  });
+});
+
+describe('DM3 fact-check: content only uses features the DM3 has', () => {
+  const all = [
+    ...SCENARIOS.map((x) => ({ id: x.id, setup: x.setup })),
+    ...EXERCISES.map((x) => ({ id: x.id, setup: x.setup ?? (() => {}) })),
+  ];
+  const sol = (id: string): Fix | undefined => SCENARIO_FIX[id] ?? EX_SOLUTION[id];
+
+  it.each(all)('$id: no DCAs, no talkback, valid gains, complete comp/gate state, ids exist', ({ id, setup }) => {
+    const { model, s, r } = fresh();
+    expect(model.dcaCount).toBe(0);
+    expect(model.features.talkback).toBe(false);
+    setup(s, r, model);
+    sol(id)?.(s, r);
+    expect(s.dcas).toEqual([]);
+    expect(s.talkback.on).toBe(false);
+    expect(s.muteGroups.length).toBe(model.muteGroupCount);
+    const [lo, hi] = model.digitalGainRange;
+    for (const [cid, ch] of Object.entries(s.channels)) {
+      expect(ch.dca, `${id} ${cid} dca`).toEqual([]);
+      expect(ch.digitalGain).toBeGreaterThanOrEqual(lo);
+      expect(ch.digitalGain).toBeLessThanOrEqual(hi);
+      expect(['post', 'pre']).toContain(ch.comp.key);
+      expect(typeof ch.comp.oneKnob).toBe('boolean');
+      expect(ch.comp.amount).toBeGreaterThanOrEqual(0);
+      expect(ch.comp.amount).toBeLessThanOrEqual(10);
+      expect(ch.gate.key).toMatch(/^(self|self-pre|ch\d+|stin|mix\d)$/);
+      // Dynamics 1 only exists on CH 1-16
+      if (/^(stin|fxr)/.test(cid)) expect(ch.gate.on, `${id} ${cid} gate`).toBe(false);
+    }
+    for (const [bid, b] of Object.entries(s.buses)) {
+      expect(['post', 'pre']).toContain(b.comp.key);
+      expect(['fader', 'eq'], bid).toContain(b.prePoint);
     }
   });
 });

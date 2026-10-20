@@ -40,6 +40,7 @@ export function OverviewScreen() {
           })}
         </div>
       </Section>
+      {c.dcas.length ? (
       <Section title="DCA GROUPS">
         <p className="note">A DCA offsets the faders of its member channels (assign members on SELECTED CH → ROUTING). DCA ON off mutes every member.</p>
         <div className="dca-grid">
@@ -59,6 +60,7 @@ export function OverviewScreen() {
           })}
         </div>
       </Section>
+      ) : null}
       <div className="screen-grid">
         <Section title="BUSES">
           <div className="ov-buses">

@@ -13,6 +13,7 @@ import { FxRack } from './fx';
 import { anyCue, dcaFor, effectiveFaderDb, governingBusId, muteGroupFor, deviceKind } from './routing';
 import { DynNode, loadDynamics } from './dynamics';
 import { getFile, putFile } from '../lib/idb';
+import { effectiveComp } from './compParams';
 import { GEQ_FREQS } from '../model/defaults';
 import { renderDemoStems, DEMO_STEMS, type StemId } from '../audio/demoStems';
 
@@ -33,8 +34,7 @@ interface PortNodes {
 
 interface Strip {
   eq: BiquadFilterNode[];
-  comp: DynamicsCompressorNode;
-  makeup: GainNode;
+  comp: DynNode | null; // Dynamics 2 worklet, lazily created
   delay: DelayNode | null; // lazily created
 }
 
@@ -45,6 +45,9 @@ interface ChNodes extends Strip {
   digital: GainNode;
   hpf: BiquadFilterNode;
   gate: DynNode | null; // lazily created
+  preEqTap: GainNode; // signal just before the EQ (after HPF): key-in "self pre EQ"
+  preEqSend: GainNode; // pre-EQ send point (after the ON key)
+  keyDelay: DelayNode | null; // key-in from a MIX bus (breaks the feedback cycle legally)
   pre: GainNode;
   on: GainNode;
   fader: GainNode;
@@ -286,12 +289,7 @@ export class AudioEngine {
       f.channelCountMode = 'explicit';
       return f;
     });
-    const comp = this.ctx.createDynamicsCompressor();
-    comp.channelCount = nch;
-    comp.channelCountMode = 'explicit';
-    const makeup = this.ctx.createGain();
-    comp.connect(makeup);
-    return { eq, comp, makeup, delay: null };
+    return { eq, comp: null, delay: null };
   }
 
   private ensureDelay(s: Strip, nch: 1 | 2): DelayNode {
@@ -328,13 +326,25 @@ export class AudioEngine {
     });
   }
 
-  private applyComp(s: Strip, c: CompState) {
-    this.set(s.comp.threshold, clamp(c.threshold, -60, 0));
-    this.set(s.comp.ratio, clamp(c.ratio, 1, 20));
-    this.set(s.comp.knee, clamp(c.knee, 0, 40));
-    this.set(s.comp.attack, clamp(c.attack, 0, 1000) / 1000);
-    this.set(s.comp.release, clamp(c.release, 10, 1000) / 1000);
-    void this.compensate(s.makeup, c.threshold, c.knee, c.ratio, c.makeup);
+  /** Configure Dynamics 2 and return its node, or null when it is off / not loaded. */
+  private applyComp(s: Strip, c: CompState, nch: 1 | 2, keyPre: AudioNode | null, group: string): AudioWorkletNode | null {
+    if (!c.on || !this.workletReady) {
+      this.wire(group, []);
+      if (s.comp) s.comp.gr = 0;
+      return null;
+    }
+    if (!s.comp) s.comp = new DynNode(this.ctx, nch, 'dm3-dyn2');
+    const p = effectiveComp(c);
+    this.set(s.comp.param('threshold'), clamp(p.threshold, -60, 0));
+    this.set(s.comp.param('ratio'), clamp(p.ratio, 1, 40));
+    this.set(s.comp.param('knee'), clamp(p.knee, 0, 24));
+    this.set(s.comp.param('attack'), clamp(p.attack, 0, 120));
+    this.set(s.comp.param('release'), clamp(p.release, 5, 5000));
+    this.set(s.comp.param('makeup'), clamp(p.makeup, -20, 40));
+    const ext = c.key === 'pre' && keyPre;
+    this.set(s.comp.param('ext'), ext ? 1 : 0);
+    this.wire(group, ext ? [{ key: 'pre', from: keyPre, to: s.comp.node, in: 1 }] : []);
+    return s.comp.node;
   }
 
   /**
@@ -400,12 +410,15 @@ export class AudioEngine {
     pre.connect(pfl).connect(this.cueBus);
     pan.connect(afl).connect(this.cueBus);
     if (c.kind === 'fxreturn') this.fx[c.fxRack! - 1].output.connect(input);
-    const n: ChNodes = { def: c, merger, input, digital, hpf, gate: null, pre, on, fader, pan, toSt, pfl, afl, sends: new Map(), ...strip };
+    const preEqTap = ctx.createGain();
+    const preEqSend = ctx.createGain();
+    preEqTap.connect(preEqSend);
+    const n: ChNodes = { def: c, merger, input, digital, hpf, gate: null, preEqTap, preEqSend, keyDelay: null, pre, on, fader, pan, toSt, pfl, afl, sends: new Map(), ...strip };
     this.chans.set(c.id, n);
     this.meters.addTap(`ch.${c.id}.in`, digital, nch);
     this.meters.addTap(`ch.${c.id}.pre`, pre, nch);
     this.meters.addTap(`ch.${c.id}.post`, fader, nch);
-    this.meters.addGr(`ch.${c.id}.gr`, () => strip.comp.reduction);
+    this.meters.addGr(`ch.${c.id}.gr`, () => n.comp?.gr ?? 0);
     this.meters.addGr(`ch.${c.id}.gate`, () => n.gate?.gr ?? 0);
     if (c.kind === 'mono') this.psrc.set(`dir_${c.id}`, [on, 0]);
   }
@@ -440,7 +453,8 @@ export class AudioEngine {
     this.buses.set(b.id, { def: b, input, pre, on, fader, out, bal, split, pfl, afl, mtx: new Map(), geq: null, ...strip });
     this.meters.addTap(`bus.${b.id}.in`, input, nch);
     this.meters.addTap(`bus.${b.id}.out`, out, nch);
-    this.meters.addGr(`bus.${b.id}.gr`, () => strip.comp.reduction);
+    this.meters.addGr(`bus.${b.id}.gr`, () => this.buses.get(b.id)?.comp?.gr ?? 0);
+    this.meters.addTap(`bus.${b.id}.pre`, pre, nch);
   }
 
   // -------------------------------------------------------------- sync ----
@@ -612,16 +626,20 @@ export class AudioEngine {
     }
     this.wire(`inpatch:${c.id}`, links);
 
-    // processing
-    this.set(n.digital.gain, dbToLin(clamp(ch.digitalGain, -96, 24)) * (ch.polarity ? -1 : 1));
+    // processing (HPF and Dynamics 1 exist on the mono input channels only)
+    const mono = c.kind === 'mono';
+    const [gMin, gMax] = this.model.digitalGainRange;
+    this.set(n.digital.gain, dbToLin(clamp(ch.digitalGain, gMin, gMax)) * (ch.polarity ? -1 : 1));
     this.set(n.hpf.frequency, clamp(ch.hpfFreq, 20, 600));
     this.applyEq(n, ch.eq);
-    this.applyComp(n, ch.comp);
-    const nch: 1 | 2 = c.kind === 'mono' ? 1 : 2;
+    const nch: 1 | 2 = mono ? 1 : 2;
+    const hpfOn = mono && ch.hpfOn;
+    const preEqSrc: AudioNode = hpfOn ? n.hpf : n.digital;
+    this.wire(`pretap:${c.id}`, [{ key: hpfOn ? 'hpf' : 'dig', from: preEqSrc, to: n.preEqTap }]);
     const stages: [string, AudioNode, AudioNode][] = [];
-    if (ch.hpfOn) stages.push(['hpf', n.hpf, n.hpf]);
+    if (hpfOn) stages.push(['hpf', n.hpf, n.hpf]);
     if (ch.eqOn) n.eq.forEach((f, i) => stages.push([`eq${i}`, f, f]));
-    if (ch.gate.on && this.workletReady) {
+    if (mono && ch.gate.on && this.workletReady) {
       if (!n.gate) n.gate = new DynNode(this.ctx, nch, 'dm3-dyn1');
       const g = ch.gate;
       this.set(n.gate.param('threshold'), clamp(g.threshold, -72, 0));
@@ -630,15 +648,31 @@ export class AudioEngine {
       this.set(n.gate.param('hold'), clamp(g.hold, 0, 2000));
       this.set(n.gate.param('decay'), clamp(g.decay, 5, 4000));
       this.set(n.gate.param('mode'), g.mode === 'ducker' ? 1 : 0);
-      const keyCh = g.key !== 'self' && g.key !== c.id ? this.chans.get(g.key) : undefined;
-      this.set(n.gate.param('ext'), keyCh ? 1 : 0);
-      this.wire(`key:${c.id}`, keyCh ? [{ key: g.key, from: keyCh.digital, to: n.gate.node, in: 1 }] : []);
+      // key-in: self post-EQ (internal), self pre-EQ, another channel, or a MIX bus
+      let keyLinks: Link[] = [];
+      if (g.key === 'self-pre') keyLinks = [{ key: 'selfpre', from: n.preEqTap, to: n.gate.node, in: 1 }];
+      else if (g.key !== 'self' && g.key !== c.id && this.chans.has(g.key)) {
+        keyLinks = [{ key: g.key, from: this.chans.get(g.key)!.digital, to: n.gate.node, in: 1 }];
+      } else if (this.buses.has(g.key)) {
+        // a bus that this channel feeds would form a cycle: Web Audio needs a delay in it
+        if (!n.keyDelay) {
+          n.keyDelay = this.ctx.createDelay(0.05);
+          n.keyDelay.delayTime.value = 0.003;
+        }
+        keyLinks = [
+          { key: `bus:${g.key}`, from: this.buses.get(g.key)!.out, to: n.keyDelay },
+          { key: 'kd', from: n.keyDelay, to: n.gate.node, in: 1 },
+        ];
+      }
+      this.set(n.gate.param('ext'), keyLinks.length ? 1 : 0);
+      this.wire(`key:${c.id}`, keyLinks);
       stages.push(['gate', n.gate.node, n.gate.node]);
     } else if (n.gate) {
       this.wire(`key:${c.id}`, []);
       n.gate.gr = 0;
     }
-    if (ch.comp.on) stages.push(['comp', n.comp, n.makeup]);
+    const comp = this.applyComp(n, ch.comp, nch, n.preEqTap, `ckey:${c.id}`);
+    if (comp) stages.push(['comp', comp, comp]);
     if (ch.delayOn) {
       const d = this.ensureDelay(n, nch);
       this.set(d.delayTime, clamp(ch.delayMs, 0, 1000) / 1000, 0.03);
@@ -649,6 +683,7 @@ export class AudioEngine {
     // ON, fader (incl. DCA), pan, ST assign, cue
     const dca = dcaFor(state, c.id);
     this.set(n.on.gain, ch.on && !dca.muted ? 1 : 0);
+    this.set(n.preEqSend.gain, ch.on && !dca.muted ? 1 : 0);
     this.set(n.fader.gain, dbToLin(effectiveFaderDb(state, c.id)));
     this.set(n.pan.pan, clamp(ch.pan / 63, -1, 1));
     this.set(n.toSt.gain, ch.toSt ? 1 : 0);
@@ -702,7 +737,10 @@ export class AudioEngine {
     this.set(sn.gain.gain, g);
     const links: Link[] = [];
     if (s && targets.length) {
-      links.push({ key: s.pre ? 'pre' : 'post', from: s.pre ? n.on : n.fader, to: sn.gain });
+      // PRE sends come from pre-fader or pre-EQ, as set per mix bus (BUS SETUP)
+      const bus = this.lastState?.buses[targets[0]];
+      const preEq = s.pre && this.buses.get(targets[0])?.def.kind === 'mix' && bus?.prePoint === 'eq';
+      links.push({ key: preEq ? 'preeq' : s.pre ? 'pre' : 'post', from: preEq ? n.preEqSend : s.pre ? n.on : n.fader, to: sn.gain });
       if (targets.length === 2) {
         if (!sn.pan) {
           sn.pan = this.ctx.createStereoPanner();
@@ -728,11 +766,11 @@ export class AudioEngine {
       this.wire(`chain:${b.id}`, [{ key: 'in>pre', from: n.input, to: n.pre }]);
     } else {
       this.applyEq(n, bs.eq);
-      this.applyComp(n, bs.comp);
       const nch: 1 | 2 = b.kind === 'stereo' ? 2 : 1;
+      const comp = this.applyComp(n, bs.comp, nch, n.input, `ckey:${b.id}`);
       const stages: [string, AudioNode, AudioNode][] = [];
       if (bs.eqOn) n.eq.forEach((f, i) => stages.push([`eq${i}`, f, f]));
-      if (bs.comp.on) stages.push(['comp', n.comp, n.makeup]);
+      if (comp) stages.push(['comp', comp, comp]);
       if (bs.geqOn && this.model.geqBuses.includes(gov)) {
         if (!n.geq) {
           n.geq = GEQ_FREQS.map((f) => {

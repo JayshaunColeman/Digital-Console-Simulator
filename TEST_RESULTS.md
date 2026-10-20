@@ -1,16 +1,16 @@
 # Acceptance test results
 
-Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live AnalyserNodes
+Run: 2026-10-20T17:45:47.600Z · headless Chromium · levels read from live AnalyserNodes
 
 ## ✅ TEST A: Main mix
 
-- PASS — Input 1 (port) shows signal (-6.0 dB)
-- PASS — Channel 1 input meter shows signal (-13.2 dB)
+- PASS — Input 1 (port) shows signal (-12.3 dB)
+- PASS — Channel 1 input meter shows signal (-8.7 dB)
 - PASS — ST assign off -> STEREO bus silent (-140.0 dB)
-- PASS — ST assign on -> STEREO master meter responds (-25.1 dB)
-- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-31.9 dB)
+- PASS — ST assign on -> STEREO master meter responds (-24.7 dB)
+- PASS — Audio reaches OMNI OUT 7 (FOH PA L) (-32.1 dB)
 - PASS — Audio reaches the browser output (-32.0 dB)
-- PASS — Muted: channel PRE meter still shows input (-7.4 dB)
+- PASS — Muted: channel PRE meter still shows input (-13.0 dB)
 - PASS — Muted: POST-fader meter silent (-140.0 dB)
 - PASS — Muted: STEREO bus silent (-140.0 dB)
 - PASS — Muted: OMNI 7 and browser output silent
@@ -57,11 +57,11 @@ Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live Anal
 - PASS — EQ OFF bypasses it
 - PASS — HPF @400 Hz attenuates a 100 Hz tone strongly (> 18 dB) (-18.0 dB -> -41.8 dB)
 - PASS — Comp ON, signal below threshold: level unchanged (no hidden make-up gain) (-18.0 dB -> -18.0 dB)
-- PASS — Comp threshold -30 / 4:1 on -18 dBFS tone: ~9 dB gain reduction (GR -8.8 dB)
-- PASS — Output level reduced accordingly (-18.0 dB -> -26.7 dB)
+- PASS — Comp threshold -30 / 4:1 on -18 dBFS tone: ~9 dB gain reduction (GR -9.0 dB)
+- PASS — Output level reduced accordingly (-18.0 dB -> -27.0 dB)
 - PASS — GR meter element present on the screen
-- PASS — MAKEUP +6 dB raises output by 6 dB (-26.7 dB -> -20.7 dB)
-- PASS — Compressor GR responds to the vocal programme (max GR -8.2 dB)
+- PASS — MAKEUP +6 dB raises output by 6 dB (-27.0 dB -> -21.0 dB)
+- PASS — Compressor GR responds to the vocal programme (max GR -14.9 dB)
 
 ## ✅ TEST F: Independent mixes
 
@@ -75,7 +75,7 @@ Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live Anal
 
 - PASS — Settings changed after storing
 - PASS — Recall restores the exact stored configuration
-- PASS — Restored routing carries audio again (OMNI 1 has the vocal) (-15.3 dB)
+- PASS — Restored routing carries audio again (OMNI 1 has the vocal) (-14.8 dB)
 - PASS — Scene persisted in local storage across reload
 
 ## ✅ EXTRA: Loop detection, troubleshooting scenario, signal flow
@@ -97,7 +97,7 @@ Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live Anal
 
 ## ✅ TEST I: Input / output delay, GEQ, matrix sends
 
-- PASS — Input delay 500 ms: impulse appears ~500 ms later after the delay (495 ms)
+- PASS — Input delay 500 ms: impulse appears ~500 ms later after the delay (502 ms)
 - PASS — GEQ 1 kHz band -12 dB on MIX 1 cuts the 1 kHz tone ~12 dB (-18.0 dB -> -30.0 dB)
 - PASS — A distant GEQ band (63 Hz) leaves the 1 kHz tone alone (-18.0 dB)
 - PASS — Input channel -> MATRIX 1 send reaches the matrix (-21.0 dB)
@@ -114,26 +114,39 @@ Run: 2026-10-20T17:34:05.567Z · headless Chromium · levels read from live Anal
 - PASS — +48V on: condenser signal arrives at mic level (~24 dB below line) (-42.0 dB)
 - PASS — Dynamic mic type: ~30 dB below line level (-48.0 dB)
 
-## ✅ TEST K: Talkback and oscillator
+## ✅ TEST K: Oscillator (DM3 has no dedicated talkback)
 
-- PASS — Talkback off: MIX 2 silent
-- PASS — Talkback on: source reaches assigned MIX 2 (bypassing the channel) (-18.0 dB)
-- PASS — ...and not the unassigned MIX 4
-- PASS — Oscillator pink noise reaches assigned MIX 3 (-20.7 dB)
+- PASS — No talkback control on the DM3 model
+- PASS — Oscillator pink noise reaches assigned MIX 3 (-21.0 dB)
 - PASS — Oscillator off: MIX 3 silent
 
-## ✅ TEST L: Scene Focus and Recall Safe
+## ✅ TEST L: Recall Safe and scene memory
 
-- PASS — Recall with Focus (output patch excluded): faders recalled
-- PASS — ...output patch left as it was (OMNI 3 still unpatched)
+- PASS — No scene Focus control on the DM3 model
+- PASS — Recall restores the other channels and the patch
 - PASS — Recall Safe CH 1 kept its current fader (-30)
+
+## ✅ TEST O: Processing matched to DM3 documentation
+
+- PASS — HIGH band LPF @1 kHz attenuates an 8 kHz tone (> 24 dB) (-18.0 dB -> -56.1 dB)
+- PASS — PRE FADER send point includes the +12 dB EQ boost (-6.0 dB)
+- PASS — PRE EQ send point bypasses the EQ (back to -18 dBFS) (-18.0 dB)
+- PASS — PRE EQ sends still follow the channel ON key
+- PASS — Comp key POST EQ: tone cut to -30 dBFS stays under -24 threshold (no GR) (GR 0.0)
+- PASS — Comp key PRE EQ: detector sees -18 dBFS -> 4.5 dB GR (GR -4.5)
+- PASS — 1-KNOB amount 8 compresses the -18 dBFS tone (GR -4.8)
+- PASS — Digital gain is limited to +24 dB (6.0 dB)
+- PASS — Strip meter switched to POST ON
+- PASS — Strip meter switched to PRE HPF
+- PASS — ST IN has no HPF / Dynamics 1 controls
+- PASS — No DCA groups on the DM3 model
 
 ## ✅ TEST M: Effect library
 
-- PASS — FX type reverb-hall: produces output, no overload (-18.2 dB)
-- PASS — FX type reverb-room: produces output, no overload (-16.6 dB)
-- PASS — FX type reverb-plate: produces output, no overload (-18.3 dB)
-- PASS — FX type early-ref: produces output, no overload (-17.7 dB)
+- PASS — FX type reverb-hall: produces output, no overload (-11.7 dB)
+- PASS — FX type reverb-room: produces output, no overload (-11.0 dB)
+- PASS — FX type reverb-plate: produces output, no overload (-18.4 dB)
+- PASS — FX type early-ref: produces output, no overload (-17.0 dB)
 - PASS — FX type delay-stereo: produces output, no overload (-17.9 dB)
 - PASS — FX type delay-mono: produces output, no overload (-17.9 dB)
 - PASS — FX type chorus: produces output, no overload (-16.0 dB)
