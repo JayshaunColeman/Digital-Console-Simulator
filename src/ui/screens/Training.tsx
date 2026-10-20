@@ -9,28 +9,7 @@ import { EXERCISES } from '../../training/exercises';
 import { defaultConsoleState, defaultRig } from '../../model/defaults';
 import { buildRoutingGraph, findBreaks, gainToDb, pathGain } from '../../engine/routing';
 import { fmtDb } from '../../lib/db';
-
-// ------------------------------------------------------------- progress ----
-
-const LS = 'dm3sim.progress.v1';
-interface Progress {
-  ex: Record<string, { done: number; at: number }>;
-  sc: Record<string, { fixed: number; hints: number; revealed: boolean; at: number }>;
-}
-function loadProgress(): Progress {
-  try {
-    return { ex: {}, sc: {}, ...(JSON.parse(localStorage.getItem(LS) ?? '{}') as Partial<Progress>) };
-  } catch {
-    return { ex: {}, sc: {} };
-  }
-}
-function saveProgress(p: Progress) {
-  try {
-    localStorage.setItem(LS, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
-}
+import { loadProgress, saveProgress } from '../progress';
 
 function useLiveCheck(check: ((ctx: CheckCtx) => CheckResult) | null): CheckResult | null {
   const [res, setRes] = useState<CheckResult | null>(null);
@@ -340,3 +319,6 @@ export function AcademyScreen() {
     </div>
   );
 }
+
+export const ACADEMY_TOTAL = EXERCISES.length;
+export const TRAINING_TOTAL = SCENARIOS.length;

@@ -418,6 +418,7 @@ test('TEST K: Oscillator (DM3 has no dedicated talkback)');
 await reset();
 await setC(`c.osc = { on: false, type: 'pink', freq: 1000, level: -20, assign: ['mix3'] };`);
 check('No talkback control on the DM3 model', (await page.getByTestId('tb-on').count()) === 0);
+await page.getByTestId('util-osc').click(); // the oscillator is a segment of the master UTILITY block
 await page.getByTestId('osc-on').click();
 const os = await peak(page, 'bus.mix3.in', 800);
 check('Oscillator pink noise reaches assigned MIX 3', os > -40 && os < -10, f(os));
@@ -485,6 +486,7 @@ check('Digital gain is limited to +24 dB', Math.abs((await peak(page, 'ch.ch16.i
 await setC(`c.channels.ch16.digitalGain = 0;`);
 // meter point selection
 await page.getByTestId('pane-mix').count();
+await page.getByTestId('util-meter').click(); // meter points are a segment of the master UTILITY block
 await page.getByTestId('mp-in-poston').click();
 check('Strip meter switched to POST ON', (await page.getByTestId('meter-ch16').getAttribute('data-tap')) === 'ch.ch16.post');
 await page.getByTestId('mp-in-prehpf').click();

@@ -423,14 +423,22 @@ export function useViewport() {
 }
 
 /** Fader / meter heights for the channel strips (taller on phones to use the screen). */
-export function useStripSize() {
+export function useStripSize(): { fader: number; meter: number; compact: boolean; sel: boolean } {
   const vp = useViewport();
-  if (!vp.mobile) return { fader: 170, meter: 150, compact: false };
+  if (!vp.mobile) {
+    // Desktop: size the bank so the touchscreen display keeps ~45 % of the height
+    // (and never less than 320 px). Short laptop screens drop the PAN row.
+    const compact = vp.h < 860;
+    const display = Math.max(320, Math.round(vp.h * 0.45));
+    const fader = Math.round(clamp(vp.h - display - (compact ? 296 : 366), 88, 170));
+    return { fader, meter: fader - 20, compact, sel: true };
+  }
   // phone in landscape: drop pan / patch / SEL rows so the fader still has travel
   if (vp.h < 520) {
     const fader = Math.max(80, Math.min(260, vp.h - 250));
-    return { fader, meter: fader - 20, compact: true };
+    return { fader, meter: fader - 20, compact: true, sel: false };
   }
-  const fader = Math.max(130, Math.min(360, vp.h - 400));
-  return { fader, meter: fader - 20, compact: false };
+  // portrait phone: the strip has three rows fewer than it used to, so the fader gets that height back
+  const fader = Math.max(130, Math.min(400, vp.h - 330));
+  return { fader, meter: fader - 20, compact: false, sel: true };
 }

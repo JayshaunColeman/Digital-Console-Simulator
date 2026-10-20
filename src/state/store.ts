@@ -87,9 +87,10 @@ export type Screen =
   | 'fx'
   | 'sources'
   | 'scenes'
-  | 'flow'
-  | 'training'
-  | 'academy';
+  | 'flow';
+
+/** Learning dock (bottom section): which learning panel is open, null = collapsed. */
+export type Learn = null | 'academy' | 'training';
 
 export type Layer = 'all' | '1-8' | '9-16' | 'st-fx' | 'out';
 
@@ -101,7 +102,8 @@ export interface UiState {
   learning: boolean;
   topic: string | null; // last interacted control kind (coach panel)
   focus: string | null; // section to scroll to on the channel screen
-  pane: 'mix' | 'screen' | 'master'; // which part is visible on phones
+  pane: 'mix' | 'screen' | 'master' | 'learn'; // which part is visible on phones
+  learn: Learn; // learning dock state
   meterIn: 'prehpf' | 'prefader' | 'poston'; // input-channel meter point (METER screen)
   meterOut: 'preeq' | 'prefader' | 'poston'; // output-bus meter point
   peakHold: boolean;
@@ -174,7 +176,7 @@ export const useStore = create<Store>()(
     model: initialModel,
     console: validState(initialModel, storedState) ? storedState : defaultConsoleState(initialModel),
     rig: storedRig ?? defaultRig(),
-    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null, pane: 'mix', meterIn: 'prefader', meterOut: 'poston', peakHold: true },
+    ui: { screen: 'overview', selected: 'ch1', sof: null, layer: 'all', learning: true, topic: null, focus: null, pane: 'mix', learn: null, meterIn: 'prefader', meterOut: 'poston', peakHold: true },
     scenes: storedScenes,
     safe: load<Record<string, boolean>>(LS_SAFE) ?? {},
     status: '',
